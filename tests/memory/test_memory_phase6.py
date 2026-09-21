@@ -8,10 +8,9 @@ from deepresearch_agent.harness import SourceMode, WorkflowMode
 from deepresearch_agent.harness.checkpoints import CheckpointManager
 from deepresearch_agent.harness.contracts import ContractCheckData
 from deepresearch_agent.harness.run_context import RunContext
-from deepresearch_agent.memory import (
-    ContextBuilder, EpisodicMemory, MemoryExtractor, MemoryPolicy, MemoryRejected,
-    MemoryRetriever, MemoryService, QueryResolver, SessionSummarizer,
-)
+from deepresearch_agent.context import ContextBuilder, ContextCompactor, QueryResolver
+from deepresearch_agent.memory import MemoryExtractor, MemoryPolicy, MemoryRejected, MemoryService
+from deepresearch_agent.sessions import SessionSearchService
 from deepresearch_agent.persistence import Database
 from deepresearch_agent.persistence.repositories import (
     AuditRepository, CheckpointRepository, ContractRepository, MemoryRepository,
@@ -57,12 +56,12 @@ async def test_query_resolver_uses_only_same_session_history(database):
 async def test_semantic_memory_cross_session_recall_and_irrelevance_filter(database):
     repository = MemoryRepository(database)
     service = MemoryService(repository, AuditRepository(database))
-    a, b = await new_session(database, "A"), await new_session(database, "B")
+    a = await new_session(database, "A")
     item = await service.create_candidate(content="项目数据库采用 SQLite 持久化", scope="project", kind="fact", provenance_refs=["message:m1"], confidence=0.9, session_id=a.session_id)
     await service.update(item.memory_id, status="active")
-    retriever = MemoryRetriever(repository, max_chars=200)
-    assert [hit.memory_id for hit in await retriever.retrieve("SQLite 数据库如何持久化", session_id=b.session_id)] == [item.memory_id]
-    assert await retriever.retrieve("今天上海天气", session_id=b.session_id) == []
+    snapshot = await service.build_snapshot()
+    assert [entry["memory_id"] for entry in snapshot["items"]["project"]] == [item.memory_id]
+    assert "SQLite" in snapshot["rendered"]
 
 
 @pytest.mark.asyncio
@@ -88,8 +87,9 @@ async def test_memory_budget_and_sensitive_content_policy(database):
     for index in range(3):
         item = await service.create_candidate(content=f"SQLite 持久化规则 {index} " + "证据" * 50, scope="project", kind="fact", provenance_refs=[f"message:{index}"], confidence=0.9, session_id=session.session_id)
         await service.update(item.memory_id, status="active")
-    hits = await MemoryRetriever(repository, max_chars=200).retrieve("SQLite 持久化规则", session_id=session.session_id)
-    assert hits and sum(len(item.content) for item in hits) <= 200
+    snapshot = await service.build_snapshot()
+    assert snapshot["rendered"]
+    assert snapshot["chars"] <= 2200
 
 
 @pytest.mark.asyncio
@@ -113,14 +113,16 @@ async def test_full_ai_reply_is_rejected_and_legacy_reply_cannot_be_activated(da
 
 
 @pytest.mark.asyncio
-async def test_episodic_fts_and_structured_summary_preserve_source_ids(database):
+async def test_session_search_and_structured_summary_preserve_source_ids(database):
     session = await new_session(database)
     messages = MessageRepository(database)
     for index in range(12):
         await messages.append(MessageCreate(session_id=session.session_id, role="user" if index % 2 == 0 else "assistant", content=f"奖学金规则第{index}轮", client_message_id=f"turn-{index}" if index % 2 == 0 else None))
-    hits = await EpisodicMemory(messages, RunRepository(database)).search("奖学金", session_id=session.session_id)
+    hits = await messages.search("奖学金", session_id=session.session_id, limit=8)
     assert hits and all(hit.message_id for hit in hits)
-    summary = await SessionSummarizer(SessionRepository(database), messages, threshold_messages=10).get_or_update(session.session_id)
+    summary = await ContextCompactor(
+        SessionRepository(database), messages, threshold_tokens=100, protect_recent_messages=5,
+    ).get_or_update(session.session_id)
     assert summary["message_ids"]
     stored = await SessionRepository(database).get(session.session_id)
     assert json.loads(stored.summary_json)["message_ids"] == summary["message_ids"]
@@ -136,7 +138,15 @@ async def test_context_builder_is_bounded_and_checkpointed_as_working_memory(dat
         RunCreate(session_id=session.session_id, trigger_message_id="atomic", source_mode=SourceMode.GRAPHRAG, workflow_mode=WorkflowMode.DEEP_RESEARCH),
     )
     memory_repository = MemoryRepository(database)
-    builder = ContextBuilder(messages, EpisodicMemory(messages, runs), MemoryRetriever(memory_repository), SessionSummarizer(sessions, messages), max_chars=2200)
+    builder = ContextBuilder(
+        messages=messages,
+        sessions=sessions,
+        memory_service=MemoryService(memory_repository, AuditRepository(database)),
+        session_search=SessionSearchService(messages, sessions),
+        compactor=ContextCompactor(sessions, messages, threshold_tokens=100, protect_recent_messages=5),
+        max_tokens=2000,
+        max_chars=2200,
+    )
     context = await builder.build(RunContext(run_id=run.run_id, session_id=session.session_id, trigger_message_id=trigger.message_id, source_mode=SourceMode.GRAPHRAG, workflow_mode=WorkflowMode.DEEP_RESEARCH, status="context_building", original_query=trigger.content))
     assert context.used_message_ids and len(json.dumps(context.context_snapshot, ensure_ascii=False)) <= 2200
     manager = CheckpointManager(CheckpointRepository(database))

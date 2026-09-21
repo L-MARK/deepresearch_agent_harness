@@ -105,7 +105,6 @@ class PlanReviewer:
             status="draft",
         )
 
-        # 若计划通过自检则标记为draft->approved交由外部确认
         validation = PlanValidationResult(
             raw_response=response,
             **{

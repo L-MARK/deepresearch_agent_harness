@@ -21,7 +21,6 @@ from deepresearch_agent.agents.multi_agent.core.retrieval_result import Retrieva
 from deepresearch_agent.agents.multi_agent.core.state import PlanExecuteState
 from deepresearch_agent.agents.multi_agent.executor.base_executor import (
     BaseExecutor,
-    ExecutorConfig,
     TaskExecutionResult,
 )
 from deepresearch_agent.agents.multi_agent.tools.evidence_tracker import get_evidence_tracker
@@ -43,16 +42,15 @@ class RetrievalExecutor(BaseExecutor):
 
     def __init__(
         self,
-        config: Optional[ExecutorConfig] = None,
-        *,
         tool_registry: Optional[Dict[str, Any]] = None,
         extra_tool_factories: Optional[Dict[str, Any]] = None,
+        *,
         provider: Optional[RetrievalProvider] = None,
         router: Optional[RetrievalRouter] = None,
         source_policy: Optional[SourcePolicy] = None,
         evidence_ledger: Optional[EvidenceLedger] = None,
     ) -> None:
-        super().__init__(config)
+        super().__init__()
         self._tool_registry = dict(tool_registry) if tool_registry is not None else None
         self._extra_factories = dict(extra_tool_factories) if extra_tool_factories is not None else None
         self._tool_cache: Dict[str, Any] = {}

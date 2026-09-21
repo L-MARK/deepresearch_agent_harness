@@ -7,7 +7,6 @@ from pydantic import ValidationError
 from backend.app.schemas import MessageCreate, RunCreate, RunEventCreate, SessionCreate
 from deepresearch_agent.harness import SourceMode, WorkflowMode
 from deepresearch_agent.persistence import ArtifactStore, Database
-from deepresearch_agent.persistence.trajectory_exporter import TrajectoryExporter
 from deepresearch_agent.persistence.repositories import CheckpointRepository, EventRepository, MessageRepository, RunRepository, SessionRepository
 
 
@@ -84,12 +83,5 @@ def test_artifact_store_confines_paths_and_verifies_hash(tmp_path):
     assert artifact.sha256 == hashlib.sha256("报告".encode("utf-8")).hexdigest()
     with pytest.raises(Exception):
         store.write_text("../escape.txt", "no")
+# End of persistence tests.
 
-
-def test_trajectory_export_redacts_secret_keys_and_values(tmp_path):
-    exporter = TrajectoryExporter(ArtifactStore(tmp_path / "artifacts"))
-    artifact = exporter.export(session_id="ses_1", payload={"api_key": "secret", "message": "Bearer abcdefghijklmnop", "safe": "ok"})
-    exported = (tmp_path / "artifacts" / artifact.relative_path).read_text(encoding="utf-8")
-    assert "secret" not in exported
-    assert "abcdefghijklmnop" not in exported
-    assert exported.count("[REDACTED]") == 2

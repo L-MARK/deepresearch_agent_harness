@@ -19,11 +19,7 @@ from deepresearch_agent.agents.multi_agent.core.plan_spec import (
     TaskNode,
 )
 from deepresearch_agent.agents.multi_agent.core.state import PlanExecuteState
-from deepresearch_agent.agents.multi_agent.executor.base_executor import (
-    BaseExecutor,
-    ExecutorConfig,
-    TaskExecutionResult,
-)
+from deepresearch_agent.agents.multi_agent.executor.base_executor import BaseExecutor, TaskExecutionResult
 from deepresearch_agent.search.tool.validation_tool import AnswerValidationTool
 
 
@@ -36,11 +32,10 @@ class ReflectionExecutor(BaseExecutor):
 
     def __init__(
         self,
-        config: Optional[ExecutorConfig] = None,
         *,
         validation_tool: Optional[AnswerValidationTool] = None,
     ) -> None:
-        super().__init__(config)
+        super().__init__()
         self._validation_tool = validation_tool
         self._validation_tools: Dict[str, AnswerValidationTool] = {}
 

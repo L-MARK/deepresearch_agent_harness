@@ -34,32 +34,7 @@ EXTRA_TOOL_FACTORIES: Dict[str, Any] = {
 }
 
 
-def get_tool_class(tool_name: str) -> Type[BaseSearchTool]:
-    """根据名称获取工具类，若不存在则抛出KeyError"""
-    return TOOL_REGISTRY[tool_name]
-
-
-def available_tools() -> Dict[str, Type[BaseSearchTool]]:
-    """返回注册表的浅拷贝"""
-    return dict(TOOL_REGISTRY)
-
-
-def available_extra_tools() -> Dict[str, Any]:
-    """返回额外工具工厂的浅拷贝"""
-    return dict(EXTRA_TOOL_FACTORIES)
-
-
-def create_extra_tool(tool_name: str) -> Any:
-    """根据名称创建额外工具实例。"""
-    factory = EXTRA_TOOL_FACTORIES[tool_name]
-    return factory()
-
-
 __all__ = [
     "TOOL_REGISTRY",
     "EXTRA_TOOL_FACTORIES",
-    "get_tool_class",
-    "available_tools",
-    "available_extra_tools",
-    "create_extra_tool",
 ]

@@ -20,7 +20,6 @@ TASK_TYPE_CHOICES: Tuple[str, ...] = (
     "deeper_research",
     "chain_exploration",
     "reflection",
-    "custom",
     "web_search",
 )
 
@@ -33,7 +32,6 @@ TaskTypeLiteral = Literal[
     "deeper_research",
     "chain_exploration",
     "reflection",
-    "custom",
     "web_search",
 ]
 
@@ -130,9 +128,9 @@ class TaskGraph(BaseModel):
     nodes: List[TaskNode] = Field(description="任务节点列表")
 
     # 执行模式
-    execution_mode: Literal["sequential", "parallel", "adaptive"] = Field(
+    execution_mode: Literal["sequential", "parallel"] = Field(
         default="sequential",
-        description="任务执行模式：sequential(串行), parallel(并行), adaptive(自适应)"
+        description="任务执行模式：sequential(串行) 或 parallel(并行)"
     )
 
     @field_validator("nodes")
@@ -339,7 +337,7 @@ class PlanSpec(BaseModel):
     )
 
     # 计划状态
-    status: Literal["draft", "approved", "executing", "completed", "failed"] = Field(
+    status: Literal["draft", "executing", "completed", "failed"] = Field(
         default="draft",
         description="计划执行状态"
     )
@@ -432,7 +430,7 @@ class PlanExecutionSignal(BaseModel):
     plan_id: str = Field(description="计划唯一标识")
     version: int = Field(description="计划版本号")
     source_mode: Literal["graphrag", "web"] = Field(default="graphrag", description="冻结的信息源")
-    execution_mode: Literal["sequential", "parallel", "adaptive"] = Field(description="建议执行模式")
+    execution_mode: Literal["sequential", "parallel"] = Field(description="建议执行模式")
     tasks: List[Dict[str, Any]] = Field(description="任务节点详细信息列表")
     execution_sequence: List[str] = Field(description="拓扑排序后的任务执行顺序")
     assumptions: List[str] = Field(description="计划假设条件")

@@ -20,7 +20,6 @@ from deepresearch_agent.agents.multi_agent.executor.base_executor import (
     BaseExecutor,
     TaskExecutionResult,
 )
-from deepresearch_agent.agents.multi_agent.executor.research_executor import ResearchExecutor
 from deepresearch_agent.agents.multi_agent.executor.retrieval_executor import RetrievalExecutor
 from deepresearch_agent.agents.multi_agent.executor.reflector import ReflectionExecutor
 from deepresearch_agent.config.settings import (
@@ -55,7 +54,6 @@ class WorkerCoordinator:
         if executors is None:
             executors = [
                 RetrievalExecutor(provider=retrieval_provider, router=retrieval_router),
-                ResearchExecutor(),
                 ReflectionExecutor(),
             ]
         self.executors = executors
@@ -123,14 +121,11 @@ class WorkerCoordinator:
     def _resolve_execution_mode(self, requested_mode: str) -> str:
         requested = (requested_mode or "sequential").lower()
         if requested not in {"sequential", "parallel"}:
-            if requested == "adaptive":
-                _LOGGER.warning("Planner 请求 adaptive 模式，当前仅支持串行或并行，将使用 %s", self.execution_mode)
-            else:
-                _LOGGER.warning(
-                    "Planner 请求的执行模式 %s 无效，将使用 %s",
-                    requested_mode,
-                    self.execution_mode,
-                )
+            _LOGGER.warning(
+                "Planner 请求的执行模式 %s 无效，将使用 %s",
+                requested_mode,
+                self.execution_mode,
+            )
             requested = "sequential"
 
         effective = self.execution_mode

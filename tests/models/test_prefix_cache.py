@@ -7,16 +7,12 @@ import pytest_asyncio
 from langchain_core.messages import AIMessage
 
 from backend.app.schemas import MessageCreate, RunCreate, SessionCreate
+from deepresearch_agent.context import ContextBuilder, ContextCompactor
 from deepresearch_agent.harness import SourceMode, WorkflowMode
 from deepresearch_agent.harness.budgets import BudgetUsage
 from deepresearch_agent.harness.run_context import RunContext
-from deepresearch_agent.memory import (
-    ContextBuilder,
-    EpisodicMemory,
-    MemoryRetriever,
-    MemoryService,
-    SessionSummarizer,
-)
+from deepresearch_agent.memory import MemoryService
+from deepresearch_agent.sessions import SessionSearchService
 from deepresearch_agent.models.prefix_cache import (
     PrefixCacheTracker,
     extract_usage,
@@ -252,7 +248,15 @@ async def test_context_builder_puts_stable_content_first(database) -> None:
     item = await service.create_candidate(content="会话恢复使用 CheckpointManager", scope="project", kind="fact", provenance_refs=["message:m1"], confidence=0.9, session_id=session.session_id)
     await service.update(item.memory_id, status="active")
 
-    builder = ContextBuilder(messages, EpisodicMemory(messages, runs), MemoryRetriever(repository), SessionSummarizer(sessions, messages), max_chars=6000)
+    builder = ContextBuilder(
+        messages=messages,
+        sessions=sessions,
+        memory_service=service,
+        session_search=SessionSearchService(messages, sessions),
+        compactor=ContextCompactor(sessions, messages, threshold_tokens=100, protect_recent_messages=5),
+        max_tokens=4000,
+        max_chars=6000,
+    )
     context = await builder.build(RunContext(
         run_id=run.run_id, session_id=session.session_id, trigger_message_id=trigger.message_id,
         source_mode=SourceMode.GRAPHRAG, workflow_mode=WorkflowMode.DEEP_RESEARCH,

@@ -7,11 +7,11 @@ from dataclasses import dataclass
 from typing import Any
 
 from deepresearch_agent.context.tokens import count_tokens
+from deepresearch_agent.context.lexical import lexical_terms
 from deepresearch_agent.persistence.repositories import AuditRepository, MemoryRepository
 from deepresearch_agent.persistence.repositories.utils import utc_now_iso
 
 from .policies import MemoryPolicy
-from .retriever import lexical_terms
 
 
 class MemoryRejected(ValueError):

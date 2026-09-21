@@ -210,9 +210,8 @@ EXTRA_TOOL_FACTORIES: Dict[str, Any] = {
     "answer_validator": AnswerValidationTool,
 }
 
-# 获取工具类
-def get_tool_class(tool_name: str) -> Type[BaseSearchTool]:
-    return TOOL_REGISTRY[tool_name]
+# 执行层直接消费注册表；不再维护无调用者的包装函数
+tool_class = TOOL_REGISTRY["hybrid_search"]
 ```
 
 ### 检索结果统一适配
@@ -486,15 +485,15 @@ def explore(self, query: str, starting_entities: List[str], max_steps: int = 5, 
 通过`tool_registry.py`，可以灵活组合不同的搜索工具：
 
 ```python
-from deepresearch_agent.search.tool_registry import get_tool_class, create_extra_tool
+from deepresearch_agent.search.tool_registry import EXTRA_TOOL_FACTORIES, TOOL_REGISTRY
 
 # 获取基础搜索工具
-HybridTool = get_tool_class("hybrid_search")
+HybridTool = TOOL_REGISTRY["hybrid_search"]
 hybrid_search = HybridTool()
 
 # 获取专用工具
-hypothesis_tool = create_extra_tool("hypothesis_generator")
-validator_tool = create_extra_tool("answer_validator")
+hypothesis_tool = EXTRA_TOOL_FACTORIES["hypothesis_generator"]()
+validator_tool = EXTRA_TOOL_FACTORIES["answer_validator"]()
 
 # 组合使用：先生成假设，再搜索，最后验证
 hypotheses = hypothesis_tool.generate(query)

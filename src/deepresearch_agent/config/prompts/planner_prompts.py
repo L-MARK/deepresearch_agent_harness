@@ -104,7 +104,7 @@ TASK_DECOMPOSE_PROMPT = '''你是一个专业的任务规划助手。你的职�
       "status": "pending"
     }}
   ],
-  "execution_mode": "adaptive"
+  "execution_mode": "parallel"
 }}
 ```
 
@@ -201,7 +201,7 @@ PLAN_REVIEW_PROMPT = '''你是一个计划审校助手。你的职责是审核�
 3. **任务类型匹配**: 每个任务的类型是否适合其描述的操作
 4. **优先级合理性**: 基础任务应该是高优先级
 5. **Token预估**: 总token消耗是否在预算内（建议 < 10000）
-6. **执行模式**: sequential(简单查询) vs adaptive(复杂查询) 的选择是否恰当
+6. **执行模式**: sequential(简单查询) 或 parallel(可并行查询) 的选择是否恰当
 7. **状态字段**: 每个任务的初始 `status` 应为 `"pending"`
 
 **生成内容**:

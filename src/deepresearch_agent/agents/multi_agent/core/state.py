@@ -10,8 +10,6 @@ from datetime import datetime
 import uuid
 
 from pydantic import BaseModel, Field
-from langchain_core.messages import BaseMessage
-
 from deepresearch_agent.config.settings import MULTI_AGENT_DEFAULT_REPORT_TYPE
 
 
@@ -202,12 +200,6 @@ class PlanExecuteState(BaseModel):
     budget_state: Dict[str, Any] = Field(default_factory=dict, description="Harness 预算快照")
     context_snapshot: Dict[str, Any] = Field(default_factory=dict, description="可恢复上下文快照")
 
-    # 兼容现有AgentState：消息列表
-    messages: List[BaseMessage] = Field(
-        default_factory=list,
-        description="对话消息历史，兼容LangChain的BaseMessage"
-    )
-
     # 用户输入
     input: str = Field(default="", description="用户输入的原始查询")
 
@@ -269,28 +261,6 @@ class PlanExecuteState(BaseModel):
             self.report_context = ReportContext(report_type=MULTI_AGENT_DEFAULT_REPORT_TYPE)
         elif not self.report_context.report_type:
             self.report_context.report_type = MULTI_AGENT_DEFAULT_REPORT_TYPE
-
-    def to_legacy_state(self) -> Dict[str, Any]:
-        """
-        转换为现有BaseAgent.AgentState格式
-        用于与旧系统兼容
-        """
-        return {
-            "messages": self.messages,
-            # 可以添加其他需要的字段
-        }
-
-    @classmethod
-    def from_legacy_state(cls, state: Dict[str, Any], input_query: str = "") -> "PlanExecuteState":
-        """
-        从现有BaseAgent.AgentState格式创建
-        用于与旧系统兼容
-        """
-        messages = state.get("messages", [])
-        return cls(
-            messages=messages,
-            input=input_query or (messages[-1].content if messages else "")
-        )
 
     def update_timestamp(self):
         """更新时间戳"""

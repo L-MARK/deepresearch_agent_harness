@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from deepresearch_agent.memory.retriever import lexical_terms
+from deepresearch_agent.context.lexical import lexical_terms
 
 from .registry import SkillRegistry
 

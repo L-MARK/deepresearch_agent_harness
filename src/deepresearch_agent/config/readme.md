@@ -14,7 +14,7 @@ deepresearch_agent/config/    # 配置文件目录
 - `graph_prompts.py`：图谱构建、索引维护、社区摘要
 - `qa_prompts.py`：各类检索问答（Naive/Local/Global/Reduce/上下文重写）
 - `reasoning_prompts.py`：深度推理流程的提示与常量
-- `planner_prompts.py`、`executor_prompts.py`、`reporter_prompts.py`：多智能体任务拆解、执行与报告模板
+- `planner_prompts.py`、`reporter_prompts.py`：多智能体任务拆解与报告模板
 - `__init__.py`：统一导出，提供单一入口 `deepresearch_agent.config.prompts`
 
 ## 模块简介
@@ -47,8 +47,8 @@ deepresearch_agent/config/    # 配置文件目录
 4. **文本处理配置**：CHUNK_SIZE、OVERLAP、MAX_TEXT_LENGTH、similarity_threshold
 5. **回答生成配置**：response_type（默认"多个段落"）
 6. **Agent工具描述**：lc_description、gl_description、naive_description、examples
-7. **性能优化配置**：MAX_WORKERS、各类BATCH_SIZE（ENTITY/CHUNK/EMBEDDING/LLM/COMMUNITY）
-8. **GDS配置**：GDS_MEMORY_LIMIT、GDS_CONCURRENCY、GDS_NODE_COUNT_LIMIT、GDS_TIMEOUT_SECONDS
+7. **性能优化配置**：MAX_WORKERS、各类BATCH_SIZE（ENTITY/CHUNK/EMBEDDING）
+8. **GDS配置**：GDS_MEMORY_LIMIT、GDS_CONCURRENCY
 9. **实体消歧与对齐配置**：
    - DISAMBIG_STRING_THRESHOLD（字符串匹配阈值，默认0.7）
    - DISAMBIG_VECTOR_THRESHOLD（向量相似度阈值，默认0.85）
@@ -229,8 +229,9 @@ from deepresearch_agent.config.settings import (
 
     # 多智能体配置
     MULTI_AGENT_PLANNER_MAX_TASKS,
-    MULTI_AGENT_AUTO_GENERATE_REPORT,
-    # ... 其他20+多智能体配置项
+    MULTI_AGENT_WORKER_EXECUTION_MODE,
+    MULTI_AGENT_REFLECTION_ALLOW_RETRY,
+    MULTI_AGENT_DEFAULT_REPORT_TYPE,
 )
 ```
 
@@ -379,14 +380,12 @@ relationship_types = [
 # 规划阶段
 MA_PLANNER_MAX_TASKS=6                  # 最大任务数
 MA_ALLOW_UNCLARIFIED_PLAN=true          # 允许未澄清的计划
-MA_STRICT_PLAN_SIGNAL=true              # 严格信号检测
 
 # 执行阶段
 MA_WORKER_EXECUTION_MODE=parallel       # sequential / parallel
 MA_WORKER_MAX_CONCURRENCY=4             # 并发度
 
 # 报告生成阶段
-MA_AUTO_GENERATE_REPORT=true            # 自动生成报告
 MA_ENABLE_MAPREDUCE=true                # 启用Map-Reduce
 MA_MAPREDUCE_THRESHOLD=20               # Map-Reduce阈值（sections数）
 MA_SECTION_MAX_EVIDENCE=8               # 每节最大证据数

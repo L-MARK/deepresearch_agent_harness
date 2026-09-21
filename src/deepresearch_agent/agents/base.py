@@ -35,7 +35,6 @@ class BaseAgent(ABC):
         self.default_recursion_limit = AGENT_SETTINGS["default_recursion_limit"]
         self.stream_flush_threshold = AGENT_SETTINGS["stream_flush_threshold"]
         self.deep_stream_flush_threshold = AGENT_SETTINGS["deep_stream_flush_threshold"]
-        self.fusion_stream_flush_threshold = AGENT_SETTINGS["fusion_stream_flush_threshold"]
         self.chunk_size = AGENT_SETTINGS["chunk_size"]
         
         self.memory = MemorySaver()

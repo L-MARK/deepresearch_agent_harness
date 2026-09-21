@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any, Literal, Optional, Protocol, Sequence
+from typing import Any, Literal, Optional, Protocol
 
 from deepresearch_agent.agents.multi_agent.core.retrieval_result import RetrievalResult
 from deepresearch_agent.harness.contracts import SourceMode
@@ -86,10 +86,6 @@ class TimeoutBoundProvider:
                 retryable=True,
                 details={"timeout_seconds": self._timeout_seconds},
             ) from exc
-
-
-def ensure_results(value: Sequence[RetrievalResult]) -> list[RetrievalResult]:
-    return list(value)
 
 
 def run_async_from_sync(awaitable_factory):

@@ -103,11 +103,7 @@ MEMORY_USER_MAX_TOKENS = _require_positive("MEMORY_USER_MAX_TOKENS", _get_env_in
 MEMORY_PROJECT_MAX_TOKENS = _require_positive("MEMORY_PROJECT_MAX_TOKENS", _get_env_int("MEMORY_PROJECT_MAX_TOKENS", 800) or 800)
 MEMORY_USER_MAX_CHARS = _require_positive("MEMORY_USER_MAX_CHARS", _get_env_int("MEMORY_USER_MAX_CHARS", 1375) or 1375)
 MEMORY_PROJECT_MAX_CHARS = _require_positive("MEMORY_PROJECT_MAX_CHARS", _get_env_int("MEMORY_PROJECT_MAX_CHARS", 2200) or 2200)
-MEMORY_WRITE_APPROVAL = _get_env_bool("MEMORY_WRITE_APPROVAL", True)
 MEMORY_BACKGROUND_REVIEW_ENABLED = _get_env_bool("MEMORY_BACKGROUND_REVIEW_ENABLED", True)
-# Deprecated compatibility aliases. New code uses token pressure and curated-store limits.
-SESSION_SUMMARY_THRESHOLD_MESSAGES = _require_positive("SESSION_SUMMARY_THRESHOLD_MESSAGES", _get_env_int("SESSION_SUMMARY_THRESHOLD_MESSAGES", 20) or 20)
-SEMANTIC_MEMORY_MAX_CHARS = MEMORY_PROJECT_MAX_CHARS
 
 TAVILY_API_KEY = os.getenv("TAVILY_API_KEY", "")
 TAVILY_SEARCH_DEPTH = _get_env_choice("TAVILY_SEARCH_DEPTH", {"basic", "advanced"}, "advanced")
@@ -233,15 +229,11 @@ BATCH_SIZE = _get_env_int("BATCH_SIZE", 100) or 100  # 批处理大小
 ENTITY_BATCH_SIZE = _get_env_int("ENTITY_BATCH_SIZE", 50) or 50  # 实体批次大小
 CHUNK_BATCH_SIZE = _get_env_int("CHUNK_BATCH_SIZE", 100) or 100  # 文本块批次
 EMBEDDING_BATCH_SIZE = _get_env_int("EMBEDDING_BATCH_SIZE", 64) or 64  # 向量批次
-LLM_BATCH_SIZE = _get_env_int("LLM_BATCH_SIZE", 5) or 5  # LLM 批次
-COMMUNITY_BATCH_SIZE = _get_env_int("COMMUNITY_BATCH_SIZE", 50) or 50  # 社区批次大小
 
 # ===== GDS 相关配置 =====
 
 GDS_MEMORY_LIMIT = _get_env_int("GDS_MEMORY_LIMIT", 6) or 6  # GDS 内存限制(GB)
 GDS_CONCURRENCY = _get_env_int("GDS_CONCURRENCY", 4) or 4  # GDS 并发度
-GDS_NODE_COUNT_LIMIT = _get_env_int("GDS_NODE_COUNT_LIMIT", 50000) or 50000  # 节点上限
-GDS_TIMEOUT_SECONDS = _get_env_int("GDS_TIMEOUT_SECONDS", 300) or 300  # 超时时长
 
 # ===== 实体消歧与对齐配置 =====
 
@@ -430,10 +422,6 @@ AGENT_SETTINGS = {
         "DEEP_AGENT_STREAM_FLUSH_THRESHOLD", 80
     )
     or 80,
-    "fusion_stream_flush_threshold": _get_env_int(
-        "FUSION_AGENT_STREAM_FLUSH_THRESHOLD", 60
-    )
-    or 60,
 }
 
 # ===== 多智能体（Plan-Execute-Report）配置 =====
@@ -441,10 +429,6 @@ AGENT_SETTINGS = {
 MULTI_AGENT_PLANNER_MAX_TASKS = _get_env_int("MA_PLANNER_MAX_TASKS", 6) or 6
 MULTI_AGENT_ALLOW_UNCLARIFIED_PLAN = _get_env_bool("MA_ALLOW_UNCLARIFIED_PLAN", True)
 MULTI_AGENT_DEFAULT_DOMAIN = os.getenv("MA_DEFAULT_DOMAIN", "通用")
-
-MULTI_AGENT_AUTO_GENERATE_REPORT = _get_env_bool("MA_AUTO_GENERATE_REPORT", True)
-MULTI_AGENT_STOP_ON_CLARIFICATION = _get_env_bool("MA_STOP_ON_CLARIFICATION", True)
-MULTI_AGENT_STRICT_PLAN_SIGNAL = _get_env_bool("MA_STRICT_PLAN_SIGNAL", True)
 
 MULTI_AGENT_DEFAULT_REPORT_TYPE = os.getenv("MA_DEFAULT_REPORT_TYPE", "long_document")
 MULTI_AGENT_ENABLE_CONSISTENCY_CHECK = _get_env_bool(

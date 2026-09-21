@@ -107,7 +107,7 @@ class TaskDecomposer:
 
         会执行以下清洗策略：
             1. 自动补充缺失字段（status、priority、estimated_tokens等）
-            2. 规范化任务类型，无法识别的映射到custom并保留原始信息
+            2. 校验任务类型，无法识别时在Planner边界直接拒绝
             3. 确保依赖字段为列表
         """
         nodes_data: List[Dict[str, Any]] = data.get("nodes") or []
@@ -116,7 +116,9 @@ class TaskDecomposer:
         for raw in nodes_data:
             node_dict = dict(raw)
 
-            task_type = node_dict.get("task_type", "custom")
+            task_type = node_dict.get("task_type")
+            if not isinstance(task_type, str) or not task_type:
+                raise ValueError(f"任务 {node_dict.get('task_id', '<unknown>')} 缺少有效 task_type")
             if source_mode == "web" and task_type in {
                 "local_search", "global_search", "hybrid_search", "naive_search", "chain_exploration"
             }:
@@ -124,11 +126,9 @@ class TaskDecomposer:
             elif source_mode == "graphrag" and task_type == "web_search":
                 task_type = "hybrid_search"
             if task_type not in _ALLOWED_TASK_TYPES:
-                original_type = task_type
-                task_type = "custom"
-                # 将原始类型记录在参数中，方便后续人工校正
-                parameters = node_dict.setdefault("parameters", {})
-                parameters["original_task_type"] = original_type
+                raise ValueError(
+                    f"任务 {node_dict.get('task_id', '<unknown>')} 的 task_type={task_type!r} 不受支持"
+                )
             node_dict["task_type"] = task_type
             node_dict["source_mode"] = source_mode
 

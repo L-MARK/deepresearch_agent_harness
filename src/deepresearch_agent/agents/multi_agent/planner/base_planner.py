@@ -86,16 +86,6 @@ class PlannerResult(BaseModel):
         # 未生成PlanSpec时视为待澄清
         return self.plan_spec is None
 
-    def executor_signal_json(self) -> Optional[str]:
-        """
-        将执行信号转换为JSON字符串，便于跨组件传递
-        """
-        if self.executor_signal is None:
-            return None
-        # Pydantic v1/v2 兼容性处理
-        import json
-        return json.dumps(self.executor_signal.model_dump(mode="json"), ensure_ascii=False, indent=2)
-
 
 class BasePlanner:
     """
@@ -238,7 +228,7 @@ class BasePlanner:
         graph_types = {"local_search", "global_search", "hybrid_search", "naive_search", "chain_exploration"}
         for node in plan_spec.task_graph.nodes:
             node.source_mode = source_mode  # type: ignore[assignment]
-            if node.task_type in {"reflection", "custom"}:
+            if node.task_type == "reflection":
                 continue
             if source_mode == "web" and node.task_type in graph_types:
                 node.task_type = "web_search"  # type: ignore[assignment]

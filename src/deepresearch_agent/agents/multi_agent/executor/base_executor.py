@@ -17,16 +17,6 @@ from deepresearch_agent.agents.multi_agent.core.state import PlanExecuteState
 from deepresearch_agent.agents.multi_agent.core.execution_record import ExecutionRecord
 
 
-class ExecutorConfig(BaseModel):
-    """
-    Worker通用配置
-    """
-
-    max_retries: int = Field(default=1, ge=0, description="单个任务的最大重试次数")
-    retry_delay_seconds: float = Field(default=0.0, ge=0.0, description="重试之间的延迟")
-    enable_reflection: bool = Field(default=False, description="是否启用反思节点")
-
-
 class TaskExecutionResult(BaseModel):
     """
     任务执行结果包装
@@ -45,9 +35,6 @@ class BaseExecutor(ABC):
     """
 
     worker_type: str = "base_executor"
-
-    def __init__(self, config: Optional[ExecutorConfig] = None) -> None:
-        self.config = config or ExecutorConfig()
 
     @abstractmethod
     def can_handle(self, task_type: str) -> bool:

@@ -72,5 +72,3 @@ class ContextCompactor:
         await self.sessions.update_summary(session_id, summary)
         return summary
 
-
-SessionSummarizer = ContextCompactor

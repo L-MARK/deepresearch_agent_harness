@@ -276,7 +276,6 @@ flowchart TB
 | 工作流 | 适用场景 |
 |---|---|
 | deep_research | 多轮搜索、推理和答案生成 |
-| fusion | 多检索策略融合 |
 | plan_execute_report | DAG 规划、多 Agent 执行、长报告生成与完成验证 |
 
 ## 技术栈
