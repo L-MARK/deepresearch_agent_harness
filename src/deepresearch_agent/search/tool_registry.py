@@ -1,40 +1,22 @@
-"""
-搜索工具注册表
-
-集中列出LangChain可调用的搜索类，便于多Agent层统一引用。
-"""
+"""Registry for the source-neutral tools kept by the Web runtime."""
 
 from typing import Any, Dict, Type
 
 from deepresearch_agent.search.tool.base import BaseSearchTool
-from deepresearch_agent.search.tool.local_search_tool import LocalSearchTool
-from deepresearch_agent.search.tool.global_search_tool import GlobalSearchTool
-from deepresearch_agent.search.tool.hybrid_tool import HybridSearchTool
-from deepresearch_agent.search.tool.naive_search_tool import NaiveSearchTool
 from deepresearch_agent.search.tool.deep_research_tool import DeepResearchTool
-from deepresearch_agent.search.tool.deeper_research_tool import DeeperResearchTool
-from deepresearch_agent.search.tool.chain_exploration_tool import ChainOfExplorationTool
 from deepresearch_agent.search.tool.hypothesis_tool import HypothesisGeneratorTool
 from deepresearch_agent.search.tool.validation_tool import AnswerValidationTool
 
 TOOL_REGISTRY: Dict[str, Type[BaseSearchTool]] = {
-    "local_search": LocalSearchTool,
-    "global_search": GlobalSearchTool,
-    "hybrid_search": HybridSearchTool,
-    "naive_search": NaiveSearchTool,
     "deep_research": DeepResearchTool,
-    "deeper_research": DeeperResearchTool,
+    # Kept as a compatibility alias for persisted plans; it uses the same
+    # Web-only implementation and has no separate graph execution path.
+    "deeper_research": DeepResearchTool,
 }
 
-# 额外暴露的专用工具（不继承BaseSearchTool）
 EXTRA_TOOL_FACTORIES: Dict[str, Any] = {
-    "chain_exploration": ChainOfExplorationTool,
     "hypothesis_generator": HypothesisGeneratorTool,
     "answer_validator": AnswerValidationTool,
 }
 
-
-__all__ = [
-    "TOOL_REGISTRY",
-    "EXTRA_TOOL_FACTORIES",
-]
+__all__ = ["TOOL_REGISTRY", "EXTRA_TOOL_FACTORIES"]

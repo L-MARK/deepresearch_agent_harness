@@ -205,7 +205,7 @@ class BasePlanner:
         markers = ("概括", "总结", "要点", "列出", "是什么", "简述", "summarize", "list ", "what is")
         if len(query) > 160 or not any(marker in query.lower() for marker in markers):
             return None
-        task_type = "web_search" if state.source_mode == "web" else "hybrid_search"
+        task_type = "web_search"
         node = TaskNode(
             task_type=task_type,
             source_mode=state.source_mode,
@@ -225,15 +225,10 @@ class BasePlanner:
     @staticmethod
     def _enforce_source_mode(plan_spec: PlanSpec, source_mode: str) -> None:
         """Normalize LLM output and reject source leakage before execution."""
-        graph_types = {"local_search", "global_search", "hybrid_search", "naive_search", "chain_exploration"}
+        if source_mode != "web":
+            raise ValueError(f"不支持的信息源: {source_mode}")
         for node in plan_spec.task_graph.nodes:
             node.source_mode = source_mode  # type: ignore[assignment]
-            if node.task_type == "reflection":
-                continue
-            if source_mode == "web" and node.task_type in graph_types:
-                node.task_type = "web_search"  # type: ignore[assignment]
-            elif source_mode == "graphrag" and node.task_type == "web_search":
-                node.task_type = "hybrid_search"  # type: ignore[assignment]
 
     def _ensure_reflection_task(self, plan_spec: Optional[PlanSpec]) -> None:
         """

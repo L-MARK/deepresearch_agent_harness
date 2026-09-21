@@ -9,7 +9,7 @@ import pprint
 import time
 import asyncio
 
-from deepresearch_agent.models.get_models import get_llm_model, get_stream_llm_model, get_embeddings_model
+from deepresearch_agent.models.get_models import get_llm_model, get_stream_llm_model
 from deepresearch_agent.cache_manager.manager import (
     CacheManager, 
     ContextAwareCacheKeyStrategy, 
@@ -31,7 +31,10 @@ class BaseAgent(ABC):
         # 初始化普通 LLM 和流式 LLM
         self.llm = get_llm_model()
         self.stream_llm = get_stream_llm_model()
-        self.embeddings = get_embeddings_model()
+        # Retrieval is provider-backed; no agent stage consumes an embedding
+        # model. Keep the attribute for callers that inspect the base API, but
+        # avoid constructing an unused external client during Web runs.
+        self.embeddings = None
         self.default_recursion_limit = AGENT_SETTINGS["default_recursion_limit"]
         self.stream_flush_threshold = AGENT_SETTINGS["stream_flush_threshold"]
         self.deep_stream_flush_threshold = AGENT_SETTINGS["deep_stream_flush_threshold"]

@@ -14,7 +14,7 @@ from pathlib import Path
 
 
 INCLUDED_DIRS = ("artifacts",)
-PROJECT_DIRS = ("skills", "files", "cache")
+PROJECT_DIRS = ("skills", "cache")
 
 
 def sha256(path: Path) -> str:
@@ -36,7 +36,7 @@ def backup(project_root: Path, destination: Path) -> Path:
     project_root = project_root.resolve()
     destination = destination.resolve()
     destination.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix="hybridrag-backup-") as temporary:
+    with tempfile.TemporaryDirectory(prefix="web-research-backup-") as temporary:
         staging = Path(temporary)
         database = project_root / "data" / "app.db"
         if not database.exists():
@@ -58,9 +58,6 @@ def backup(project_root: Path, destination: Path) -> Path:
             source = project_root / name
             if source.exists():
                 shutil.copytree(source, staging / name)
-        neo4j_dump = project_root / "data" / "neo4j.dump"
-        if neo4j_dump.exists():
-            shutil.copy2(neo4j_dump, staging / "data" / "neo4j.dump")
         files = sorted(path for path in staging.rglob("*") if path.is_file())
         manifest = {
             "created_at": datetime.now(timezone.utc).isoformat(),
@@ -81,7 +78,7 @@ def restore(project_root: Path, archive_path: Path, *, confirm: bool) -> None:
     project_root, archive_path = project_root.resolve(), archive_path.resolve()
     if not archive_path.is_file():
         raise FileNotFoundError(archive_path)
-    with tempfile.TemporaryDirectory(prefix="hybridrag-restore-") as temporary:
+    with tempfile.TemporaryDirectory(prefix="web-research-restore-") as temporary:
         staging = Path(temporary)
         with zipfile.ZipFile(archive_path) as archive:
             for member in archive.infolist():

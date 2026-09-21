@@ -8,7 +8,7 @@ from deepresearch_agent.harness.verifiers.deterministic import DeterministicVeri
 def evidence(evidence_id: str, source_id: str = "doc-1") -> dict:
     return {
         "evidence_id": evidence_id,
-        "source_mode": "graphrag",
+        "source_mode": "web",
         "source_id": source_id,
         "metadata_json": "{}",
     }
@@ -41,7 +41,7 @@ def test_citations_stay_with_strongest_authority_tier() -> None:
 def test_verifier_rejects_null_consistency_and_uncited_claims() -> None:
     report = "# 报告\n\n这是第一条有引用的完整结论 [ev_a]\n\n这是第二条没有引用的完整结论。\n\n## 局限\n\n来源有限。"
     verifier = DeterministicVerifiers(
-        run_id="run-1", source_mode=SourceMode.GRAPHRAG,
+        run_id="run-1", source_mode=SourceMode.WEB,
         report=report, evidence=[evidence("ev_a")],
     )
     assert verifier.citation_integrity().passed is False
@@ -52,7 +52,7 @@ def test_verifier_rejects_null_consistency_and_uncited_claims() -> None:
 def test_verifier_uses_only_cited_sources_for_diversity() -> None:
     report = "# 报告\n\n这是一个有来源支持的完整结论 [ev_a]"
     verifier = DeterministicVerifiers(
-        run_id="run-1", source_mode=SourceMode.GRAPHRAG, report=report,
+        run_id="run-1", source_mode=SourceMode.WEB, report=report,
         evidence=[evidence("ev_a", "doc-1"), evidence("ev_b", "doc-2")],
     )
     assert verifier.source_diversity().passed is False

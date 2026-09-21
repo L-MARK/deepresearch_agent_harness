@@ -59,7 +59,7 @@ __all__ = ["RetrievalRouter"]
 
 
 def create_default_router() -> RetrievalRouter:
-    """Build lazy GraphRAG and configured Tavily providers for real entry points."""
+    """Build the single lazy Web provider used by real entry points."""
     from deepresearch_agent.config.settings import (
         ARTIFACT_ROOT,
         TAVILY_API_KEY,
@@ -68,34 +68,28 @@ def create_default_router() -> RetrievalRouter:
         TAVILY_SEARCH_DEPTH,
         TAVILY_TIMEOUT_SECONDS,
     )
-    def build_graphrag() -> RetrievalProvider:
-        from deepresearch_agent.retrieval.graphrag_provider import GraphRAGProvider
-        return GraphRAGProvider()
-
-    providers: dict[SourceMode, RetrievalProvider] = {
-        SourceMode.GRAPHRAG: _LazyProvider(
-            mode=SourceMode.GRAPHRAG,
-            provider_name="graphrag",
-            factory=build_graphrag,
+    def build_tavily() -> RetrievalProvider:
+        from deepresearch_agent.persistence.artifact_store import ArtifactStore
+        from deepresearch_agent.retrieval.tavily_provider import TavilyProvider
+        return TavilyProvider(
+            api_key=TAVILY_API_KEY,
+            artifact_store=ArtifactStore(ARTIFACT_ROOT),
+            default_depth=TAVILY_SEARCH_DEPTH,  # type: ignore[arg-type]
+            default_max_results=TAVILY_MAX_RESULTS,
+            timeout_seconds=TAVILY_TIMEOUT_SECONDS,
+            cache_ttl_seconds=TAVILY_CACHE_TTL_SECONDS,
         )
-    }
-    if TAVILY_API_KEY:
-        def build_tavily() -> RetrievalProvider:
-            from deepresearch_agent.persistence.artifact_store import ArtifactStore
-            from deepresearch_agent.retrieval.tavily_provider import TavilyProvider
-            return TavilyProvider(
-                api_key=TAVILY_API_KEY,
-                artifact_store=ArtifactStore(ARTIFACT_ROOT),
-                default_depth=TAVILY_SEARCH_DEPTH,  # type: ignore[arg-type]
-                default_max_results=TAVILY_MAX_RESULTS,
-                timeout_seconds=TAVILY_TIMEOUT_SECONDS,
-                cache_ttl_seconds=TAVILY_CACHE_TTL_SECONDS,
-            )
-        providers[SourceMode.WEB] = _LazyProvider(
+
+    # Keep construction lazy so health/capability endpoints can start without
+    # instantiating the SDK. The provider itself gives the actionable missing-key
+    # error when a run actually attempts a search.
+    providers: dict[SourceMode, RetrievalProvider] = {
+        SourceMode.WEB: _LazyProvider(
             mode=SourceMode.WEB,
             provider_name="tavily",
             factory=build_tavily,
         )
+    }
     return RetrievalRouter(providers)
 
 

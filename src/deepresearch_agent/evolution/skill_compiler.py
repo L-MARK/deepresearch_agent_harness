@@ -18,7 +18,9 @@ def compile_runtime_policy(selected: dict[str, Any] | None, *, source_mode: str)
     sources = set(permissions.get("allowed_sources") or [source_mode])
     if not sources.issubset({source_mode}):
         raise SkillPolicyError("Skill Policy 试图扩大 Run 来源权限")
-    allowed = {"tavily_search"} if source_mode == "web" else {"local_search", "hybrid_search"}
+    if source_mode != "web":
+        raise SkillPolicyError("仅支持 Web 信息源")
+    allowed = {"tavily_search", "web_search", "deep_research", "deeper_research"}
     tools = set(permissions.get("allowed_tools") or selected.get("allowed_tools") or [])
     if not tools.issubset(allowed):
         raise SkillPolicyError("Skill Policy 试图扩大 Run 工具权限")

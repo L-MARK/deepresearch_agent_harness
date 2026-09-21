@@ -50,7 +50,7 @@ class MessageRead(PersistenceDTO):
 class RunCreate(PersistenceDTO):
     session_id: str
     trigger_message_id: str
-    source_mode: SourceMode
+    source_mode: SourceMode = SourceMode.WEB
     workflow_mode: WorkflowMode
     config_snapshot: Dict[str, Any] = Field(default_factory=dict)
     budget: Dict[str, Any] = Field(default_factory=dict)

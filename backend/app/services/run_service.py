@@ -147,7 +147,7 @@ class RunService:
                 timeout_seconds=context.budget_limits.tool_timeout_seconds,
             )
             if context.workflow_mode is WorkflowMode.DEEP_RESEARCH:
-                agent = DeepResearchAgent(use_deeper_tool=True, retrieval_provider=provider, run_id=context.run_id)
+                agent = DeepResearchAgent(retrieval_provider=provider, run_id=context.run_id)
                 agents.append(agent)
                 return DeepResearchDriver(context, agent, events=events)
             worker = WorkerCoordinator(

@@ -7,20 +7,13 @@ from deepresearch_agent.search.tool.reasoning.validator import AnswerValidator
 
 
 class AnswerValidationTool:
-    """
-    将AnswerValidator封装成LangChain Tool。
-    默认复用HybridSearchTool的关键词提取能力以评估相关性。
-    """
+    """将AnswerValidator封装成LangChain Tool。"""
 
-    def __init__(self, *, enable_graph: bool = True):
-        if enable_graph:
-            from deepresearch_agent.search.tool.hybrid_tool import HybridSearchTool
-            keyword_tool = HybridSearchTool()
-            extractor = keyword_tool.extract_keywords
-        else:
-            def extractor(query: str) -> Dict[str, List[str]]:
-                tokens = [token for token in re.findall(r"[\w\u4e00-\u9fff]+", query) if len(token) > 1]
-                return {"high_level": tokens[:3], "low_level": tokens[3:8] or tokens[:3]}
+    def __init__(self):
+        def extractor(query: str) -> Dict[str, List[str]]:
+            tokens = [token for token in re.findall(r"[\w\u4e00-\u9fff]+", query) if len(token) > 1]
+            return {"high_level": tokens[:3], "low_level": tokens[3:8] or tokens[:3]}
+
         self.validator = AnswerValidator(extractor)
 
     def validate(

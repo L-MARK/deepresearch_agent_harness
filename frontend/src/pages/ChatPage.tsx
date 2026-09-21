@@ -9,7 +9,6 @@ import { ErrorState } from "../components/ErrorState";
 import { EvidenceDrawer } from "../components/EvidenceDrawer";
 import { FloatingComposer } from "../components/FloatingComposer";
 import { MessageStrip } from "../components/MessageStrip";
-import { SourceSelector } from "../components/SourceSelector";
 import { WhiteboardDrawer } from "../components/WhiteboardDrawer";
 import { arrivedStages, STAGES, StageMeta, StageState, stageCardId } from "../components/stageMeta";
 import { deriveStageFeed, StageFeed } from "../components/stageFeed";
@@ -84,7 +83,7 @@ function ExecCard({ feed, run }: {feed: StageFeed; run: Run | null}) {
 
   const executionSummary = run?.status === "failed"
     ? ["NO_SOURCE_EVIDENCE", "INSUFFICIENT_SOURCE_EVIDENCE"].includes(run.error_code ?? "")
-      ? "私域资料不足，研究已停止"
+      ? "Web 证据不足，研究已停止"
       : "研究执行失败"
     : run?.status === "budget_exhausted"
       ? "研究预算耗尽，执行已停止"
@@ -129,7 +128,7 @@ function CardSummary({ lines, meta }: {lines: string[]; meta?: string}) {
 export function ChatPage({ sessionId }: {sessionId?: string}) {
   const queryClient = useQueryClient();
   const [text, setText] = useState("");
-  const [source, setSource] = useState<SourceMode>(() => (localStorage.getItem("source_mode") as SourceMode) || "graphrag");
+  const source: SourceMode = "web";
   const [workflow, setWorkflow] = useState<WorkflowMode>("deep_research");
   const [runId, setRunId] = useState<string | null>(null);
   const [selectedEvidence, setSelectedEvidence] = useState<Evidence | null>(null);
@@ -152,7 +151,6 @@ export function ChatPage({ sessionId }: {sessionId?: string}) {
   const contextInspector = useQuery({ queryKey: ["context", runId], queryFn: () => api.context(runId!), enabled: Boolean(runId), refetchInterval: run && !TERMINAL.includes(run.status) ? 5000 : false });
   const cacheStats = useQuery({ queryKey: ["cacheStats"], queryFn: api.cacheStats, refetchInterval: 5000 });
 
-  useEffect(() => { localStorage.setItem("source_mode", source); }, [source]);
   useEffect(() => { localStorage.setItem("chat.stripCollapsed", stripCollapsed ? "1" : "0"); }, [stripCollapsed]);
   useEffect(() => { localStorage.setItem("chat.composerCollapsed", composerCollapsed ? "1" : "0"); }, [composerCollapsed]);
   useEffect(() => {
@@ -165,16 +163,11 @@ export function ChatPage({ sessionId }: {sessionId?: string}) {
   }, [detail.data, runId, sessionId]);
   useEffect(() => {
     if (!run) return;
-    setSource(run.source_mode); setWorkflow(run.workflow_mode);
+    setWorkflow(run.workflow_mode);
     if (run.status === "paused" || (!run.pause_requested && run.status !== "pausing")) setPausing(false);
     if (run.status === "cancelled") setCancelling(false);
     if (run.status !== "paused" && run.status !== "pausing") setResuming(false);
   }, [run?.run_id, run?.status, run?.pause_requested]);
-  useEffect(() => {
-    if (!capabilities.data || capabilities.data.sources[source]?.available) return;
-    const fallback = ([capabilities.data.default_source_mode, "graphrag", "web"] as SourceMode[]).find((mode) => capabilities.data!.sources[mode]?.available);
-    if (fallback) setSource(fallback);
-  }, [capabilities.data, source]);
   useEffect(() => {
     if (run && [...TERMINAL, "needs_user_input"].includes(run.status)) {
       queryClient.invalidateQueries({ queryKey: ["session", sessionId] });
@@ -210,12 +203,12 @@ export function ChatPage({ sessionId }: {sessionId?: string}) {
 
   async function submit(event: FormEvent) {
     event.preventDefault();
-    const sourceAvailable = capabilities.data?.sources[source]?.available ?? false;
+    const sourceAvailable = capabilities.data?.sources.web?.available ?? false;
     const resumable = run?.status === "paused" || run?.status === "pausing" || Boolean(run?.pause_requested) || pausing;
     if (!sessionId || !text.trim() || sending || (!sourceAvailable && !resumable) || (run && !TERMINAL.includes(run.status) && !resumable)) return;
     setSending(true); setError(null);
     try {
-      const result = await api.send(sessionId, { client_message_id: crypto.randomUUID(), content: text.trim(), source_mode: source, workflow_mode: workflow });
+      const result = await api.send(sessionId, { client_message_id: crypto.randomUUID(), content: text.trim(), source_mode: "web", workflow_mode: workflow });
       const sameRun = result.run_id === runId;
       setText(""); setRunId(result.run_id);
       if (sameRun) restart();
@@ -297,7 +290,7 @@ export function ChatPage({ sessionId }: {sessionId?: string}) {
     }
   }
 
-  if (!sessionId) return <main className="empty-chat"><div><span className="hero-mark">H</span><h1>开始一项可信研究</h1><p>创建会话，在私有知识图谱或 Web 中选择一个信息源。</p></div></main>;
+  if (!sessionId) return <main className="empty-chat"><div><span className="hero-mark">H</span><h1>开始一项可信研究</h1><p>创建会话，使用联网搜索获取可追溯证据。</p></div></main>;
   return <main className="chat-page">
     <header className="chat-header">
       <div><span className="eyebrow">PERSISTENT RESEARCH SESSION</span><h1>{detail.data?.title ?? "加载中…"}</h1></div>
@@ -351,8 +344,8 @@ export function ChatPage({ sessionId }: {sessionId?: string}) {
           initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 24, scale: 0.9 }}
           transition={{ type: "spring", stiffness: 320, damping: 26 }}
         >
-          <div className="composer-tools"><SourceSelector value={source} onChange={setSource} capabilities={capabilities.data} /><select value={workflow} onChange={(event) => setWorkflow(event.target.value as WorkflowMode)}><option value="deep_research">DeepResearch</option><option value="plan_execute_report">Plan–Execute–Report</option></select></div>
-          {source === "web" && capabilities.data?.sources.web.reason && <small className="capability-note">{capabilities.data.sources.web.reason}</small>}
+          <div className="composer-tools"><span className="source-badge">联网搜索</span><select value={workflow} onChange={(event) => setWorkflow(event.target.value as WorkflowMode)}><option value="deep_research">DeepResearch</option><option value="plan_execute_report">Plan–Execute–Report</option></select></div>
+          {capabilities.data?.sources.web.reason && <small className="capability-note">{capabilities.data.sources.web.reason}</small>}
           <textarea value={text} onChange={(event) => setText(event.target.value)} onKeyDown={onComposerKeyDown} placeholder="提出一个需要证据支持的问题…" rows={3} />
           <div className="composer-actions">
             <span>{(["paused", "pausing"].includes(run?.status ?? "") || run?.pause_requested || pausing) ? "输入“继续 / 接着做 / 按计划执行”等，或点击恢复" : "Enter 发送 · Shift+Enter 换行 · 每个 Run 冻结当前来源"}</span>
@@ -364,7 +357,7 @@ export function ChatPage({ sessionId }: {sessionId?: string}) {
               </> : run && !TERMINAL.includes(run.status) ? <>
                 <button type="button" className="pause" disabled={pausing || run.status === "pausing"} onClick={pauseRun}>{pausing || run.status === "pausing" ? "正在暂停…" : "暂停"}</button>
                 <button type="button" className="stop" disabled={cancelling || run.cancellation_requested} onClick={cancelRun}>{cancelling || run.cancellation_requested ? "正在取消…" : "取消"}</button>
-              </> : <button className="send" disabled={sending || !text.trim() || !(capabilities.data?.sources[source]?.available ?? false)}>{sending ? "发送中…" : "发送研究 →"}</button>}
+              </> : <button className="send" disabled={sending || !text.trim() || !(capabilities.data?.sources.web?.available ?? false)}>{sending ? "发送中…" : "发送研究 →"}</button>}
             </div>
           </div>
         </motion.form>

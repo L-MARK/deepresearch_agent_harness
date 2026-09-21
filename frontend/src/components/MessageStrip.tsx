@@ -32,7 +32,7 @@ export function MessageStrip({ collapsed, onToggle, messages, runs, onOpenReport
           return <div key={message.message_id} className={`message ${message.role} is-strip${isReport ? " is-report-summary" : ""}`}>
             <div className="message-meta">
               <span>{message.role === "user" ? "你" : "Research Agent"}</span>
-              {linked && <span className={`source-badge ${linked.source_mode}`}>{linked.source_mode === "web" ? "Web" : "私有库"}</span>}
+              {linked && <span className="source-badge web">Web</span>}
             </div>
               <div className="message-body">{preview}</div>
               {isReport && linked && <div className="message-report-meta"><span>{message.content.length.toLocaleString()} 字符 · 完整内容已收纳到报告工作区</span><button type="button" onClick={() => onOpenReport?.(linked.run_id)}>查看完整报告 →</button></div>}

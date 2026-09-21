@@ -135,7 +135,7 @@ async def test_context_builder_is_bounded_and_checkpointed_as_working_memory(dat
     await messages.append(MessageCreate(session_id=session.session_id, role="user", content="讨论 SQLite 会话", client_message_id="history"))
     trigger, run, _ = await runs.create_for_user_message(
         MessageCreate(session_id=session.session_id, role="user", content="那恢复呢？", client_message_id="current"),
-        RunCreate(session_id=session.session_id, trigger_message_id="atomic", source_mode=SourceMode.GRAPHRAG, workflow_mode=WorkflowMode.DEEP_RESEARCH),
+        RunCreate(session_id=session.session_id, trigger_message_id="atomic", source_mode=SourceMode.WEB, workflow_mode=WorkflowMode.DEEP_RESEARCH),
     )
     memory_repository = MemoryRepository(database)
     builder = ContextBuilder(
@@ -147,7 +147,7 @@ async def test_context_builder_is_bounded_and_checkpointed_as_working_memory(dat
         max_tokens=2000,
         max_chars=2200,
     )
-    context = await builder.build(RunContext(run_id=run.run_id, session_id=session.session_id, trigger_message_id=trigger.message_id, source_mode=SourceMode.GRAPHRAG, workflow_mode=WorkflowMode.DEEP_RESEARCH, status="context_building", original_query=trigger.content))
+    context = await builder.build(RunContext(run_id=run.run_id, session_id=session.session_id, trigger_message_id=trigger.message_id, source_mode=SourceMode.WEB, workflow_mode=WorkflowMode.DEEP_RESEARCH, status="context_building", original_query=trigger.content))
     assert context.used_message_ids and len(json.dumps(context.context_snapshot, ensure_ascii=False)) <= 2200
     manager = CheckpointManager(CheckpointRepository(database))
     await manager.save(context, "context_building")
@@ -161,7 +161,7 @@ async def test_extractor_requires_verified_completed_run(database):
     session = await sessions.create(SessionCreate(title="extract"))
     trigger, run, _ = await runs.create_for_user_message(
         MessageCreate(session_id=session.session_id, role="user", content="请记住我偏好简短报告", client_message_id="extract"),
-        RunCreate(session_id=session.session_id, trigger_message_id="atomic", source_mode=SourceMode.GRAPHRAG, workflow_mode=WorkflowMode.DEEP_RESEARCH),
+        RunCreate(session_id=session.session_id, trigger_message_id="atomic", source_mode=SourceMode.WEB, workflow_mode=WorkflowMode.DEEP_RESEARCH),
     )
     repository = MemoryRepository(database)
     llm = FakeMemoryLlm({"candidates": [{
@@ -190,7 +190,7 @@ async def test_llm_extractor_accepts_implicit_feedback_but_requires_grounded_quo
     session = await sessions.create(SessionCreate(title="implicit preference"))
     trigger, run, _ = await runs.create_for_user_message(
         MessageCreate(session_id=session.session_id, role="user", content="这个表格太复杂了，我更容易阅读简洁的要点。", client_message_id="implicit"),
-        RunCreate(session_id=session.session_id, trigger_message_id="atomic", source_mode=SourceMode.GRAPHRAG, workflow_mode=WorkflowMode.DEEP_RESEARCH),
+        RunCreate(session_id=session.session_id, trigger_message_id="atomic", source_mode=SourceMode.WEB, workflow_mode=WorkflowMode.DEEP_RESEARCH),
     )
     contracts = ContractRepository(database)
     await contracts.upsert(ContractCheckData(check_id=f"check-{run.run_id}", run_id=run.run_id, kind="source_match", verifier="test", verifier_version="1", passed=True))

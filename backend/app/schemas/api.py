@@ -33,7 +33,7 @@ class SessionPatch(ApiModel):
 class MessageSend(ApiModel):
     client_message_id: str = Field(min_length=1, max_length=128)
     content: str = Field(min_length=1, max_length=20000)
-    source_mode: SourceMode
+    source_mode: SourceMode = SourceMode.WEB
     workflow_mode: WorkflowMode = WorkflowMode.DEEP_RESEARCH
     report_type: Literal["brief", "long_document"] = "brief"
 

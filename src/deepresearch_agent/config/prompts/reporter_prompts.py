@@ -275,23 +275,23 @@ CITATION_FORMAT_PROMPT = '''你是一个引用格式化助手。你需要将检�
 ```markdown
 ## 参考文献
 
-[result_chunk_123] 来源: chunk:doc_123_chunk_5 (社区:人物社区) (置信度:0.95)
+[result_web_123] 来源: webpage:doc_123 (置信度:0.95)
     内容摘要: 孙悟空在斜月三星洞拜菩提祖师为师...
 
-[result_entity_456] 来源: entity:孙悟空 (知识图谱实体) (置信度:0.88)
-    关系: 孙悟空 -师徒-> 菩提祖师
+[result_web_456] 来源: webpage:doc_456 (置信度:0.88)
+    内容摘要: 孙悟空与菩提祖师的师徒关系...
 
-[result_path_001] 来源: subgraph:path_001 (关系路径探索) (置信度:0.82)
-    路径: 孙悟空 -> 大闹天宫 -> 天庭 -> 如来佛祖
+[result_web_789] 来源: webpage:doc_789 (置信度:0.82)
+    内容摘要: 孙悟空从花果山到天庭的经历...
 ```
 
 **apa格式**:
 ```markdown
 ## References
 
-[result_chunk_123] chunk:doc_123_chunk_5 (2024). Character relationships in Journey to the West. Retrieved from 悟空传文本数据库.
+[result_web_123] webpage:doc_123 (2024). Character relationships in Journey to the West. Retrieved from the cited Web page.
 
-[result_entity_456] entity:孙悟空 (2024). Knowledge graph entity. Neo4j graph database.
+[result_web_456] webpage:doc_456 (2024). Character relationships in Journey to the West. Retrieved from the cited Web page.
 ```
 
 现在请生成引用列表，使用Markdown格式输出：

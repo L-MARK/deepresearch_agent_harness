@@ -138,7 +138,7 @@ export function CardDetailDrawer({ stageId, run, feed, report, evidence, context
                   <span className="evidence-title">{item.title || "未命名来源"}</span>
                   <span className="evidence-summary">{item.summary}</span>
                   <span className="evidence-meta">
-                    <span className={`source-badge ${item.source_mode}`}>{item.source_mode === "web" ? "Web" : "私有库"}</span>
+                    <span className="source-badge web">Web</span>
                     <span className="evidence-provider">{item.provider}</span>
                     <span className="evidence-score">{item.score.toFixed(2)}</span>
                   </span>

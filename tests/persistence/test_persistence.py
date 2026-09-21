@@ -25,7 +25,7 @@ async def test_session_message_run_survive_reopen_and_are_idempotent(database, t
     runs = RunRepository(database)
     created_session = await sessions.create(SessionCreate(title="持久会话"))
     message = MessageCreate(session_id=created_session.session_id, role="user", content="测试持久化", client_message_id="client-1")
-    run = RunCreate(session_id=created_session.session_id, trigger_message_id="assigned-atomically", source_mode=SourceMode.GRAPHRAG, workflow_mode=WorkflowMode.PLAN_EXECUTE_REPORT)
+    run = RunCreate(session_id=created_session.session_id, trigger_message_id="assigned-atomically", source_mode=SourceMode.WEB, workflow_mode=WorkflowMode.PLAN_EXECUTE_REPORT)
 
     first_message, first_run, created = await runs.create_for_user_message(message, run)
     repeated_message, repeated_run, repeated = await runs.create_for_user_message(message, run)
@@ -44,7 +44,7 @@ async def test_session_message_run_survive_reopen_and_are_idempotent(database, t
     await database.close()
     reopened = Database(url)
     assert (await SessionRepository(reopened).get(created_session.session_id)).title == "持久会话"
-    assert (await RunRepository(reopened).get(first_run.run_id)).source_mode == "graphrag"
+    assert (await RunRepository(reopened).get(first_run.run_id)).source_mode == "web"
     await reopened.close()
 
 
@@ -53,7 +53,7 @@ async def test_checkpoint_versions_hash_and_foreign_keys(database):
     session = await SessionRepository(database).create(SessionCreate(title="checkpoint"))
     message, run, _ = await RunRepository(database).create_for_user_message(
         MessageCreate(session_id=session.session_id, role="user", content="checkpoint", client_message_id="checkpoint-1"),
-        RunCreate(session_id=session.session_id, trigger_message_id="atomic", source_mode=SourceMode.GRAPHRAG, workflow_mode=WorkflowMode.DEEP_RESEARCH),
+        RunCreate(session_id=session.session_id, trigger_message_id="atomic", source_mode=SourceMode.WEB, workflow_mode=WorkflowMode.DEEP_RESEARCH),
     )
     checkpoints = CheckpointRepository(database)
     first = await checkpoints.save(run.run_id, "context", {"value": 1})

@@ -12,12 +12,12 @@ ROOT = Path(__file__).resolve().parents[2]
 
 def test_compose_packages_three_loopback_services_and_persistent_data():
     compose = yaml.safe_load((ROOT / "docker-compose.yaml").read_text(encoding="utf-8"))
-    assert set(compose["services"]) == {"neo4j", "backend", "frontend"}
+    assert set(compose["services"]) == {"backend", "frontend"}
     for service in compose["services"].values():
         for port in service.get("ports", []):
             assert str(port).startswith("127.0.0.1:")
     backend_volumes = set(compose["services"]["backend"]["volumes"])
-    assert {"./data:/app/data", "./skills:/app/skills", "./files:/app/files", "./cache:/app/cache"}.issubset(backend_volumes)
+    assert {"./data:/app/data", "./skills:/app/skills", "./cache:/app/cache"}.issubset(backend_volumes)
     assert compose["services"]["backend"]["environment"]["FASTAPI_WORKERS"] == "1"
     assert compose["services"]["frontend"]["ports"] == ["127.0.0.1:${FRONTEND_PORT:-5173}:80"]
     assert "${FRONTEND_PORT:-5173}" in compose["services"]["backend"]["environment"]["FRONTEND_ORIGINS"]

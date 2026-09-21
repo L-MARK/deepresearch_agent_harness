@@ -15,7 +15,7 @@ class IsolatedExecutor(BaseExecutor):
         self.barrier = barrier
 
     def can_handle(self, task_type: str) -> bool:
-        return task_type == "naive_search"
+        return task_type == "web_search"
 
     def execute_task(self, task, state, signal):
         self.barrier.wait(timeout=5)
@@ -28,7 +28,7 @@ class IsolatedExecutor(BaseExecutor):
 
 
 def test_parallel_workers_merge_local_state_once_in_plan_order():
-    tasks = [TaskNode(task_id=f"task_{index}", task_type="naive_search", description=str(index)) for index in range(4)]
+    tasks = [TaskNode(task_id=f"task_{index}", task_type="web_search", description=str(index)) for index in range(4)]
     plan = PlanSpec(problem_statement=ProblemStatement(original_query="parallel"), task_graph=TaskGraph(nodes=tasks, execution_mode="parallel"), acceptance_criteria=AcceptanceCriteria())
     state = PlanExecuteState(input="parallel", plan=plan)
     coordinator = WorkerCoordinator(executors=[IsolatedExecutor(threading.Barrier(4))], execution_mode="parallel", max_parallel_workers=4)

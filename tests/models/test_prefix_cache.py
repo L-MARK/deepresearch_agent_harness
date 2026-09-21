@@ -240,7 +240,7 @@ async def test_context_builder_puts_stable_content_first(database) -> None:
         ))
     trigger, run, _ = await runs.create_for_user_message(
         MessageCreate(session_id=session.session_id, role="user", content="那恢复机制呢？", client_message_id="current"),
-        RunCreate(session_id=session.session_id, trigger_message_id="atomic", source_mode=SourceMode.GRAPHRAG, workflow_mode=WorkflowMode.DEEP_RESEARCH),
+        RunCreate(session_id=session.session_id, trigger_message_id="atomic", source_mode=SourceMode.WEB, workflow_mode=WorkflowMode.DEEP_RESEARCH),
     )
     # 一条已激活的语义记忆，应出现在变量区（查询之后）
     repository = MemoryRepository(database)
@@ -259,7 +259,7 @@ async def test_context_builder_puts_stable_content_first(database) -> None:
     )
     context = await builder.build(RunContext(
         run_id=run.run_id, session_id=session.session_id, trigger_message_id=trigger.message_id,
-        source_mode=SourceMode.GRAPHRAG, workflow_mode=WorkflowMode.DEEP_RESEARCH,
+        source_mode=SourceMode.WEB, workflow_mode=WorkflowMode.DEEP_RESEARCH,
         status="context_building", original_query=trigger.content,
     ))
 

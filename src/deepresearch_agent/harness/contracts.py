@@ -14,7 +14,6 @@ def utc_now() -> datetime:
 
 
 class SourceMode(str, Enum):
-    GRAPHRAG = "graphrag"
     WEB = "web"
 
 

@@ -32,7 +32,7 @@ class HarnessRunResult:
 async def run_persistent_query(
     query: str,
     *,
-    source_mode: SourceMode | str = SourceMode.GRAPHRAG,
+    source_mode: SourceMode | str = SourceMode.WEB,
     workflow_mode: WorkflowMode | str = WorkflowMode.DEEP_RESEARCH,
     database_url: str = APP_DATABASE_URL,
     client_message_id: str | None = None,
@@ -55,7 +55,7 @@ async def run_persistent_query(
 
         def workflow_factory(context, events=None):
             if workflow is WorkflowMode.DEEP_RESEARCH:
-                agent = DeepResearchAgent(use_deeper_tool=True, retrieval_provider=provider, run_id=context.run_id)
+                agent = DeepResearchAgent(retrieval_provider=provider, run_id=context.run_id)
                 agents.append(agent)
                 return DeepResearchDriver(context, agent, events=events)
             bundle = MultiAgentFactory.create_default_bundle(retrieval_provider=provider)

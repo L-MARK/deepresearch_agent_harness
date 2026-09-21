@@ -47,7 +47,7 @@ class TaskDecomposer:
         self._llm = llm or get_llm_model()
         self._max_tasks = max_tasks
 
-    def decompose(self, query: str, *, source_mode: str = "graphrag") -> TaskDecompositionResult:
+    def decompose(self, query: str, *, source_mode: str = "web") -> TaskDecompositionResult:
         """
         根据查询生成TaskGraph
 
@@ -61,17 +61,13 @@ class TaskDecomposer:
             query=query,
             max_tasks=self._max_tasks,
         )
-        if source_mode == "web":
-            prompt += (
-                "\n\n【不可覆盖的信息源约束】本 Run 的 source_mode=web。"
-                "所有检索任务只能使用 web_search、deep_research 或 deeper_research；"
-                "禁止 local_search/global_search/hybrid_search/naive_search/chain_exploration。"
-            )
-        else:
-            prompt += (
-                "\n\n【不可覆盖的信息源约束】本 Run 的 source_mode=graphrag。"
-                "禁止生成 web_search；检索只能使用私有知识图谱工具。"
-            )
+        if source_mode != "web":
+            raise ValueError(f"不支持的信息源: {source_mode}")
+        prompt += (
+            "\n\n【不可覆盖的信息源约束】本 Run 仅使用 Web。"
+            "所有检索任务只能使用 web_search、deep_research 或 deeper_research；"
+            "不得生成其他检索类型。"
+        )
 
         _LOGGER.debug("TaskDecomposer prompt: %s", prompt)
         response = self._invoke_llm(prompt)
@@ -101,7 +97,7 @@ class TaskDecomposer:
             _LOGGER.error("TaskDecomposer JSON解析失败: %s | 原始输出: %s", exc, response)
             raise ValueError("无法解析任务分解输出为有效JSON") from exc
 
-    def _build_task_graph(self, data: Dict[str, Any], *, source_mode: str = "graphrag") -> TaskGraph:
+    def _build_task_graph(self, data: Dict[str, Any], *, source_mode: str = "web") -> TaskGraph:
         """
         将原始JSON转换为TaskGraph模型
 
@@ -119,12 +115,8 @@ class TaskDecomposer:
             task_type = node_dict.get("task_type")
             if not isinstance(task_type, str) or not task_type:
                 raise ValueError(f"任务 {node_dict.get('task_id', '<unknown>')} 缺少有效 task_type")
-            if source_mode == "web" and task_type in {
-                "local_search", "global_search", "hybrid_search", "naive_search", "chain_exploration"
-            }:
-                task_type = "web_search"
-            elif source_mode == "graphrag" and task_type == "web_search":
-                task_type = "hybrid_search"
+            if source_mode != "web":
+                raise ValueError(f"不支持的信息源: {source_mode}")
             if task_type not in _ALLOWED_TASK_TYPES:
                 raise ValueError(
                     f"任务 {node_dict.get('task_id', '<unknown>')} 的 task_type={task_type!r} 不受支持"

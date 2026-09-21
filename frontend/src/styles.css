@@ -1,5 +1,5 @@
 /* ============================================================
-   DeepResearch HybridRAG — 蓝白高级感浅色设计系统
+   DeepResearch Web Research — 蓝白高级感浅色设计系统
    结构：tokens → base → 布局 → 聊天 → 画板 → 报告 →
          composer → 抽屉 → 澄清/错误 → 管理页 → keyframes
    ============================================================ */
@@ -128,7 +128,6 @@ button { cursor: pointer; }
 .message.user .message-body { background: var(--accent-soft); border-color: var(--accent-border); border-radius: 16px 4px 16px 16px; }
 .source-badge { padding: 2px 8px; border-radius: var(--radius-pill); font-size: 9px; font-weight: 600; letter-spacing: 0.04em; border: 1px solid transparent; }
 .source-badge.web { background: var(--warning-soft); color: var(--warning); border-color: color-mix(in srgb, var(--warning) 22%, var(--surface)); }
-.source-badge.graphrag { background: var(--accent-soft); color: var(--accent); border-color: var(--accent-border); }
 
 .inline-error { color: var(--danger); border-top: 1px solid var(--divider); margin-top: 12px; padding-top: 10px; font-size: var(--text-sm); }
 .verification-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
@@ -229,11 +228,7 @@ button { cursor: pointer; }
 .composer-tools { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
 .composer-tools select { border: 1px solid var(--border); background: var(--surface); padding: 6px 9px; border-radius: var(--radius-sm); color: var(--text-secondary); font-size: 11px; transition: border-color var(--dur-fast); }
 .composer-tools select:hover { border-color: var(--border-strong); }
-.source-selector { display: flex; gap: 3px; background: var(--surface-sunken); border-radius: var(--radius-sm); padding: 3px; }
-.source-selector label { border-radius: 6px; color: var(--text-secondary); font-size: 11px; padding: 5px 12px; cursor: pointer; transition: all var(--dur-fast) var(--ease-out); }
-.source-selector label.selected { background: var(--surface); color: var(--accent); font-weight: 500; box-shadow: var(--shadow-xs); }
-.source-selector label.disabled { opacity: 0.4; cursor: not-allowed; }
-.source-selector input { display: none; }
+.source-badge { display: inline-flex; align-items: center; gap: 3px; background: var(--surface-sunken); border-radius: var(--radius-sm); padding: 5px 10px; color: var(--accent); font-size: 11px; font-weight: 500; }
 .composer textarea { width: 100%; resize: none; border: 0; outline: 0; padding: 11px 7px 8px; color: var(--text-primary); background: transparent; font-size: var(--text-lg); line-height: 1.5; }
 .composer textarea::placeholder { color: var(--text-faint); }
 .composer-actions { display: flex; align-items: center; justify-content: space-between; color: var(--text-faint); font-size: 9px; font-family: var(--font-mono); }
@@ -434,7 +429,6 @@ button { cursor: pointer; }
   .canvas-svg { display: none; }
   .composer { margin: 0 8px 8px; padding: 9px 10px; }
   .composer-tools { gap: 8px; align-items: flex-start; }
-  .source-selector { flex-wrap: wrap; }
   .composer-actions > span { max-width: 170px; line-height: 1.35; }
   .evidence-drawer, .card-detail-drawer { width: calc(100vw - 24px); max-width: none; padding-left: 20px; padding-right: 20px; }
   .management-page { padding: 28px 18px; }

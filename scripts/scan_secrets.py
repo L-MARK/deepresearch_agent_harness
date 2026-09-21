@@ -7,7 +7,7 @@ import re
 from pathlib import Path
 
 
-SECRET_NAMES = {"OPENAI_API_KEY", "TAVILY_API_KEY", "NEO4J_PASSWORD", "LANGSMITH_API_KEY"}
+SECRET_NAMES = {"OPENAI_API_KEY", "TAVILY_API_KEY", "LANGSMITH_API_KEY"}
 
 
 def configured_secrets(env_path: Path) -> set[str]:

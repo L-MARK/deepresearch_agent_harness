@@ -31,7 +31,7 @@ async def create_run(database, *, completed=True, replan=False):
     session = await SessionRepository(database).create(SessionCreate(title="skill"))
     message, run, _ = await RunRepository(database).create_for_user_message(
         MessageCreate(session_id=session.session_id, role="user", content="比较资料并生成引用报告", client_message_id=f"c-{session.session_id}"),
-        RunCreate(session_id=session.session_id, trigger_message_id="atomic", source_mode=SourceMode.GRAPHRAG, workflow_mode=WorkflowMode.PLAN_EXECUTE_REPORT),
+        RunCreate(session_id=session.session_id, trigger_message_id="atomic", source_mode=SourceMode.WEB, workflow_mode=WorkflowMode.PLAN_EXECUTE_REPORT),
     )
     if replan:
         await EventRepository(database).append(RunEventCreate(run_id=run.run_id, event_type="plan.replanning", stage="replanning"))
@@ -42,11 +42,11 @@ async def create_run(database, *, completed=True, replan=False):
     return run
 
 
-def spec(version="0.1.0", *, name="evidence-research", tool="local_search"):
+def spec(version="0.1.0", *, name="evidence-research", tool="tavily_search"):
     return SkillSpec(
         name=name, description="对复杂资料执行同源检索并生成经过验证的引用报告。", version=version,
-        source_modes=["graphrag"], created_from_runs=["run_source"], triggers=["比较资料"],
-        inputs=["研究问题"], steps=["拆解问题", "同源检索证据", "生成引用报告", "执行完成验证"],
+        source_modes=["web"], created_from_runs=["run_source"], triggers=["比较资料"],
+        inputs=["研究问题"], steps=["拆解问题", "Web 检索证据", "生成引用报告", "执行完成验证"],
         allowed_tools=[tool], fallback="证据不足时补充同源检索。", verification=["citation_integrity"],
     )
 
@@ -85,7 +85,7 @@ async def test_candidate_is_not_loaded_before_promotion(services):
     database, repository, registry = services
     run = await create_run(database)
     await registry.register_candidate(run_id=run.run_id, spec=spec(), eval_cases=[{}, {}])
-    resolved = await SkillLoader(registry).resolve("比较资料", source_mode="graphrag")
+    resolved = await SkillLoader(registry).resolve("比较资料", source_mode="web")
     assert resolved == {"catalog": [], "selected": None}
 
 
@@ -111,10 +111,10 @@ async def test_promote_progressive_load_and_permission_boundary(services):
         await policy.promote(name=candidate.name, version=candidate.proposed_version, human_approved=False)
     active = await policy.promote(name=candidate.name, version=candidate.proposed_version, human_approved=True)
     assert active.status == "active"
-    resolved = await SkillLoader(registry).resolve("请比较资料", source_mode="graphrag")
+    resolved = await SkillLoader(registry).resolve("请比较资料", source_mode="web")
     assert resolved["catalog"] == [{"name": "evidence-research", "description": spec().description, "version": "0.1.0"}]
     assert "## 步骤" in resolved["selected"]["content"]
-    assert (await SkillLoader(registry).resolve("请比较资料", source_mode="web"))["selected"] is None
+    assert (await SkillLoader(registry).resolve("不匹配的主题", source_mode="web"))["selected"] is None
 
 
 @pytest.mark.asyncio

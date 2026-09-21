@@ -11,29 +11,15 @@ import uuid
 from pydantic import BaseModel, Field
 
 RETRIEVAL_SOURCE_CHOICES: Tuple[str, ...] = (
-    "local_search",
-    "global_search",
-    "hybrid_search",
-    "naive_search",
     "deep_research",
     "deeper_research",
-    "chain_exploration",
-    "graph_search",
-    "hybrid",
     "custom",
     "tavily_search",
 )
 
 RetrievalSourceLiteral = Literal[
-    "local_search",
-    "global_search",
-    "hybrid_search",
-    "naive_search",
     "deep_research",
     "deeper_research",
-    "chain_exploration",
-    "graph_search",
-    "hybrid",
     "custom",
     "tavily_search",
 ]
@@ -49,15 +35,7 @@ class RetrievalMetadata(BaseModel):
     source_id: str = Field(description="数据源唯一标识符")
 
     # 数据源类型
-    source_type: Literal[
-        "document",
-        "chunk",
-        "entity",
-        "relationship",
-        "community",
-        "subgraph",
-        "webpage",
-    ] = Field(description="数据源类型")
+    source_type: Literal["webpage"] = Field(description="数据源类型")
 
     # 置信度 (0.0-1.0)
     confidence: float = Field(
@@ -89,19 +67,6 @@ class RetrievalMetadata(BaseModel):
         description="Digital Object层级，仅DO粒度时有效"
     )
 
-    # 社区ID（LocalSearch时有效）
-    community_id: Optional[str] = Field(
-        default=None,
-        description="所属社区ID"
-    )
-
-    # 图遍历跳数（GraphSearch时有效）
-    hop_count: Optional[int] = Field(
-        default=None,
-        ge=0,
-        description="图遍历的跳数"
-    )
-
     # 额外元数据（扩展用）
     extra: Dict[str, Any] = Field(
         default_factory=dict,
@@ -113,7 +78,7 @@ class RetrievalResult(BaseModel):
     """
     检索结果统一接口
 
-    适配IoD风格的多粒度检索（DO/Chunk/AtomicKnowledge/KGSubgraph）
+    适配 Web 检索结果的统一接口。
     """
     # 结果唯一标识
     result_id: str = Field(
@@ -126,8 +91,6 @@ class RetrievalResult(BaseModel):
         "DO",           # Digital Object（文档级）
         "L2-DO",        # Level 2 Digital Object（段落级）
         "Chunk",        # 文本块
-        "AtomicKnowledge",  # 原子知识（三元组等）
-        "KGSubgraph"    # 知识图谱子图
     ] = Field(description="检索粒度")
 
     # 检索内容（可以是文本或结构化数据）
@@ -141,8 +104,8 @@ class RetrievalResult(BaseModel):
     # 检索来源
     source: RetrievalSourceLiteral = Field(description="检索来源工具")
 
-    source_mode: Literal["graphrag", "web"] = Field(
-        default="graphrag",
+    source_mode: Literal["web"] = Field(
+        default="web",
         description="产生本证据的冻结 Run 信息源",
     )
 
@@ -175,10 +138,8 @@ class RetrievalResult(BaseModel):
             return f'[{self.result_id[:8]}] "{self.metadata.source_type}." {self.metadata.source_id}, {self.metadata.timestamp.year}.'
         else:
             # 默认格式
-            mode_label = "[Web]" if self.source_mode == "web" else "[私有库]"
+            mode_label = "[Web]"
             source_desc = f"{self.metadata.source_type}:{self.metadata.source_id}"
-            if self.metadata.community_id:
-                source_desc += f" (社区:{self.metadata.community_id})"
             return f"{mode_label} [{self.result_id[:8]}] 来源: {source_desc} (置信度:{self.metadata.confidence:.2f})"
 
     @classmethod
@@ -240,7 +201,7 @@ class RetrievalResult(BaseModel):
             evidence=data["evidence"],
             metadata=metadata,
             source=data["source"],
-            source_mode=data.get("source_mode", "graphrag"),
+            source_mode="web",
             score=data.get("score", 0.5),
             created_at=created_at
         )

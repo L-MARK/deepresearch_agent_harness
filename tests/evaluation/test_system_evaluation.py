@@ -41,7 +41,7 @@ async def test_run_and_summary_metrics_come_from_durable_trajectory(database):
         RunCreate(
             session_id=session.session_id,
             trigger_message_id="atomic",
-            source_mode=SourceMode.GRAPHRAG,
+            source_mode=SourceMode.WEB,
             workflow_mode=WorkflowMode.DEEP_RESEARCH,
         ),
     )
@@ -49,8 +49,8 @@ async def test_run_and_summary_metrics_come_from_durable_trajectory(database):
     await EvidenceRepository(database).upsert(EvidenceData(
         evidence_id="ev_gold_a",
         run_id=run.run_id,
-        source_mode=SourceMode.GRAPHRAG,
-        provider="local_search",
+        source_mode=SourceMode.WEB,
+        provider="tavily_search",
         source_id="gold-a",
         summary="supporting evidence",
         content_hash="a" * 64,

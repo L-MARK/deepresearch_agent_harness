@@ -24,8 +24,8 @@ class ApiFakeDriver:
         self.results = [
             RetrievalResult(
                 result_id=f"raw-api-{index}", granularity="Chunk", evidence=f"API integrated evidence {index}",
-                metadata=RetrievalMetadata(source_id=f"doc-api-{index}", source_type="chunk", content_hash=character * 64),
-                source="local_search", source_mode="graphrag", score=0.95,
+                metadata=RetrievalMetadata(source_id=f"doc-api-{index}", source_type="webpage", content_hash=character * 64),
+                source="tavily_search", source_mode="web", score=0.95,
             )
             for index, character in ((1, "a"), (2, "b"))
         ]
@@ -50,17 +50,17 @@ class ApiFakeDriver:
         return {"executed": self.executed, "result_ids": [item.result_id for item in self.results], "report": self._report}
 
     def execution_records(self):
-        call = ToolCall(tool_name="local_search", tool_call_id=f"call-{self.context.run_id}", source_mode="graphrag", args={"query": "safe"}, result={"ok": True})
+        call = ToolCall(tool_name="tavily_search", tool_call_id=f"call-{self.context.run_id}", source_mode="web", args={"query": "safe"}, result={"ok": True})
         return [ExecutionRecord(task_id=f"task-{self.context.run_id}", session_id=self.context.session_id, worker_type="fake", tool_calls=[call], evidence=self.results, metadata=ExecutionMetadata(worker_type="fake", tool_calls_count=1, evidence_count=2))]
 
     def evidence_results(self):
-        return [(f"task-{self.context.run_id}", f"call-{self.context.run_id}", "local_search", item) for item in self.results]
+        return [(f"task-{self.context.run_id}", f"call-{self.context.run_id}", "tavily_search", item) for item in self.results]
 
     def report_consistency(self):
         return True
 
     def plan_record(self):
-        task = {"task_id": f"task-{self.context.run_id}", "task_type": "deep_research", "source_mode": "graphrag", "status": "pending"}
+        task = {"task_id": f"task-{self.context.run_id}", "task_type": "deep_research", "source_mode": "web", "status": "pending"}
         return ({"plan_id": f"plan-{self.context.run_id}", "status": "executing", "tasks": [task]}, [task])
 
 
@@ -80,7 +80,7 @@ def new_session(client):
     return response.json()["session_id"]
 
 
-def send(client, session_id, *, client_id=None, source="graphrag"):
+def send(client, session_id, *, client_id=None, source="web"):
     return client.post(f"/api/v1/sessions/{session_id}/messages", json={
         "client_message_id": client_id or str(uuid.uuid4()), "content": "请生成研究报告",
         "source_mode": source, "workflow_mode": "deep_research",
@@ -125,7 +125,7 @@ def test_detailed_request_raises_report_depth_and_evidence_requirement(client):
     response = client.post(f"/api/v1/sessions/{session_id}/messages", json={
         "client_message_id": str(uuid.uuid4()),
         "content": "写一份详细的、关于心血管疾病的研究报告",
-        "source_mode": "graphrag",
+        "source_mode": "web",
         "workflow_mode": "plan_execute_report",
     })
     assert response.status_code == 202
@@ -146,7 +146,7 @@ def test_run_report_evidence_and_durable_sse_replay(client):
     assert terminal["status"] == "completed", (terminal["error_code"], terminal["error_message"])
     evidence = client.get(f"/api/v1/runs/{run_id}/evidence").json()
     report = client.get(f"/api/v1/runs/{run_id}/report").json()
-    assert evidence["total"] == 2 and evidence["items"][0]["source_mode"] == "graphrag"
+    assert evidence["total"] == 2 and evidence["items"][0]["source_mode"] == "web"
     assert report["content"].startswith("# 研究报告")
     assert report["artifact"]["sha256"] and all(item["passed"] for item in report["verification"] if item["required"])
     context = client.get(f"/api/v1/runs/{run_id}/context")
@@ -226,7 +226,7 @@ def test_pause_and_natural_language_resume_keep_same_run(client):
     resumed = client.post(f"/api/v1/sessions/{session_id}/messages", json={
         "client_message_id": str(uuid.uuid4()),
         "content": "按刚才的计划接着做吧",
-        "source_mode": "graphrag",
+        "source_mode": "web",
         "workflow_mode": "deep_research",
     })
     assert resumed.status_code == 202
@@ -258,7 +258,7 @@ def test_natural_language_resume_can_cancel_pending_pause(client):
     resumed = client.post(f"/api/v1/sessions/{session_id}/messages", json={
         "client_message_id": str(uuid.uuid4()),
         "content": "继续执行",
-        "source_mode": "graphrag",
+        "source_mode": "web",
         "workflow_mode": "deep_research",
     })
     assert resumed.status_code == 202
@@ -284,7 +284,7 @@ def test_clarification_resumes_same_run(client):
     async def create_waiting():
         message, run, _ = await RunRepository(client.app.state.database).create_for_user_message(
             MessageCreate(session_id=session_id, role="user", content="它呢？", client_message_id="clarify-original"),
-            RunCreate(session_id=session_id, trigger_message_id="atomic", source_mode=SourceMode.GRAPHRAG, workflow_mode=WorkflowMode.DEEP_RESEARCH, config_snapshot={}, budget={}),
+            RunCreate(session_id=session_id, trigger_message_id="atomic", source_mode=SourceMode.WEB, workflow_mode=WorkflowMode.DEEP_RESEARCH, config_snapshot={}, budget={}),
         )
         await RunRepository(client.app.state.database).update_status(run.run_id, status="needs_user_input", current_stage="needs_user_input")
         return run.run_id
@@ -350,7 +350,7 @@ def test_ten_turn_session_survives_app_restart(tmp_path):
         for turn in range(10):
             response = first.post(f"/api/v1/sessions/{session_id}/messages", json={
                 "client_message_id": f"turn-{turn}", "content": "那恢复机制呢？" if turn else "请研究 SQLite 会话恢复机制",
-                "source_mode": "graphrag", "workflow_mode": "deep_research",
+                "source_mode": "web", "workflow_mode": "deep_research",
             })
             run_id = response.json()["run_id"]
             assert wait_terminal(first, run_id)["status"] == "completed"
@@ -376,8 +376,8 @@ def test_skill_api_evaluate_promote_and_rollback(client):
             run_id=run_id,
             spec=SkillSpec(
                 name="api-research-skill", description="通过 API 评测和人工启用的同源研究流程。", version=version,
-                source_modes=["graphrag"], created_from_runs=[run_id], triggers=["研究报告"], inputs=["问题"],
-                steps=["规划", "检索", "报告", "验证"], allowed_tools=["local_search"],
+                source_modes=["web"], created_from_runs=[run_id], triggers=["研究报告"], inputs=["问题"],
+                steps=["规划", "Web 检索", "报告", "验证"], allowed_tools=["tavily_search"],
                 fallback="证据不足时继续同源检索。", verification=["citation_integrity"],
             ),
             eval_cases=[{"name": "positive"}, {"name": "boundary"}],
@@ -402,8 +402,8 @@ def test_skill_candidate_detail_and_id_scoped_actions(client):
             run_id=run_id,
             spec=SkillSpec(
                 name="candidate-detail-skill", description="可查看完整内容并按候选 ID 操作。", version="0.1.0",
-                source_modes=["graphrag"], created_from_runs=[run_id], triggers=["候选详情"], inputs=["问题"],
-                steps=["规划", "执行", "验证"], allowed_tools=["local_search"],
+                source_modes=["web"], created_from_runs=[run_id], triggers=["候选详情"], inputs=["问题"],
+                steps=["规划", "Web 检索", "验证"], allowed_tools=["tavily_search"],
                 fallback="证据不足则停止。", verification=["citation_integrity"],
             ),
             eval_cases=[{"name": "positive"}, {"name": "boundary"}],

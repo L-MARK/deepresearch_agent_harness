@@ -21,7 +21,7 @@ class ToolCall(BaseModel):
     tool_name: str = Field(description="调用的工具名称")
 
     tool_call_id: str = Field(default_factory=lambda: f"call_{uuid.uuid4().hex}")
-    source_mode: str = Field(default="graphrag", description="调用冻结的信息源")
+    source_mode: str = Field(default="web", description="调用冻结的信息源")
 
     # 工具参数
     args: Dict[str, Any] = Field(description="工具调用参数")

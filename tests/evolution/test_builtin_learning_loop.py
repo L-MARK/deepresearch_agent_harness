@@ -30,15 +30,15 @@ class JsonLLM:
                 "blocking_issues": [], "revision_instructions": [], "unsupported_rule_refs": [], "conflict_refs": [],
             })})()
         return type("Response", (), {"content": json.dumps({
-            "decision": "create", "title": "GraphRAG 证据研究", "rationale": "验证轨迹包含可复用流程",
-            "name": "graphrag-evidence-workflow", "proposed_version": "0.1.0",
-            "description": "使用私域证据完成可验证研究报告的流程技能。",
-            "applicability": {"source_modes": ["graphrag"]}, "triggers": ["研究报告"],
-            "inputs": ["研究问题"], "rules": ["拆解研究问题", "同源检索证据", "按证据生成报告"],
+            "decision": "create", "title": "Web 证据研究", "rationale": "验证轨迹包含可复用流程",
+            "name": "web-evidence-workflow", "proposed_version": "0.1.0",
+            "description": "使用 Web 证据完成可验证研究报告的流程技能。",
+            "applicability": {"source_modes": ["web"]}, "triggers": ["研究报告"],
+            "inputs": ["研究问题"], "rules": ["拆解研究问题", "Web 检索证据", "按证据生成报告"],
             "anti_patterns": ["无新增证据时重复检索"], "stop_conditions": ["达到 Run 预算时停止"],
             "verification": ["citation_integrity", "claim_support"], "fallback": "证据不足时报告局限。",
-            "allowed_tools": ["local_search"], "limitations": ["不得跨来源"],
-            "machine_policy": {"permissions": {"allowed_tools": ["local_search"], "allowed_sources": ["graphrag"]}, "budgets": {"max_retries": 2}},
+            "allowed_tools": ["tavily_search"], "limitations": ["不得跨来源"],
+            "machine_policy": {"permissions": {"allowed_tools": ["tavily_search"], "allowed_sources": ["web"]}, "budgets": {"max_retries": 2}},
             "support_files": [], "trace_refs": ["tool_call:call-one"],
         }, ensure_ascii=False)})()
 
@@ -81,12 +81,12 @@ async def completed_run(database):
     session = await SessionRepository(database).create(SessionCreate(title="learn"))
     message, run, _ = await RunRepository(database).create_for_user_message(
         MessageCreate(session_id=session.session_id, role="user", content="写一份详细研究报告", client_message_id="learn-1"),
-        RunCreate(session_id=session.session_id, trigger_message_id="atomic", source_mode=SourceMode.GRAPHRAG, workflow_mode=WorkflowMode.PLAN_EXECUTE_REPORT),
+        RunCreate(session_id=session.session_id, trigger_message_id="atomic", source_mode=SourceMode.WEB, workflow_mode=WorkflowMode.PLAN_EXECUTE_REPORT),
     )
     now = utc_now_iso()
     async with database.transaction() as db:
-        db.add(ToolCallModel(tool_call_id="call-one", run_id=run.run_id, task_id=None, tool_name="local_search", source_mode="graphrag", status="completed", args_json='{"query":"a"}', result_json="{}", created_at=now, completed_at=now))
-        db.add(ToolCallModel(tool_call_id="call-two", run_id=run.run_id, task_id=None, tool_name="local_search", source_mode="graphrag", status="completed", args_json='{"query":"b"}', result_json="{}", created_at=now, completed_at=now))
+        db.add(ToolCallModel(tool_call_id="call-one", run_id=run.run_id, task_id=None, tool_name="tavily_search", source_mode="web", status="completed", args_json='{"query":"a"}', result_json="{}", created_at=now, completed_at=now))
+        db.add(ToolCallModel(tool_call_id="call-two", run_id=run.run_id, task_id=None, tool_name="tavily_search", source_mode="web", status="completed", args_json='{"query":"b"}', result_json="{}", created_at=now, completed_at=now))
     await ContractRepository(database).upsert(ContractCheckData(check_id="check-learning", run_id=run.run_id, kind="source_match", verifier="test", verifier_version="1", passed=True))
     await RunRepository(database).complete_verified(run.run_id, assistant_content="# report", usage={})
     return await RunRepository(database).get(run.run_id)
@@ -137,11 +137,11 @@ async def test_revision_to_ignore_completes_without_false_rejection(env):
 
 
 def test_validator_blocks_permission_expansion():
-    pack = ReviewPack(review_id="r", run_id="run", user_goal="q", workflow_mode="plan_execute_report", source_mode="graphrag", terminal_status="completed", artifact_refs=["run:run"])
+    pack = ReviewPack(review_id="r", run_id="run", user_goal="q", workflow_mode="plan_execute_report", source_mode="web", terminal_status="completed", artifact_refs=["run:run"])
     proposal = SkillProposal(
         decision="create", name="unsafe-expansion", proposed_version="0.1.0", description="unsafe expansion",
         rules=["a", "b", "c"], anti_patterns=["x"], stop_conditions=["y"], verification=["z"],
-        allowed_tools=["tavily_search"], trace_refs=["run:run"],
+        allowed_tools=["unsupported_tool"], trace_refs=["run:run"],
     )
     result = ProposalValidators().validate(pack, proposal)
     assert not result.passed and any("扩大" in item for item in result.errors)
@@ -192,13 +192,13 @@ async def test_real_replay_gate_and_staged_promotion(env):
     run = await completed_run(database)
     skill = SkillSpec(
         name="staged-research", description="真实回放后经过 Shadow 和 Canary 的研究技能。", version="0.1.0",
-        source_modes=["graphrag"], created_from_runs=[run.run_id], triggers=["研究报告"], inputs=["问题"],
-        steps=["计划", "检索", "报告"], allowed_tools=["local_search"], fallback="停止并报告。",
+        source_modes=["web"], created_from_runs=[run.run_id], triggers=["研究报告"], inputs=["问题"],
+        steps=["计划", "Web 检索", "报告"], allowed_tools=["tavily_search"], fallback="停止并报告。",
         verification=["citation_integrity"], anti_patterns=["重复"], stop_conditions=["预算耗尽"],
-        machine_policy={"permissions": {"allowed_tools": ["local_search"], "allowed_sources": ["graphrag"]}},
+        machine_policy={"permissions": {"allowed_tools": ["tavily_search"], "allowed_sources": ["web"]}},
     )
     candidate = await registry.register_candidate(run_id=run.run_id, spec=skill, eval_cases=[
-        {"query": f"研究报告 {index}", "source_mode": "graphrag", "workflow_mode": "plan_execute_report"}
+        {"query": f"研究报告 {index}", "source_mode": "web", "workflow_mode": "plan_execute_report"}
         for index in range(3)
     ])
 
@@ -228,8 +228,8 @@ async def test_canary_regression_auto_suspends(env):
     run = await completed_run(database)
     skill = SkillSpec(
         name="canary-breaker", description="验证 Canary 在线退化时自动暂停的研究技能。", version="0.1.0",
-        source_modes=["graphrag"], created_from_runs=[run.run_id], triggers=["研究"], inputs=["问题"],
-        steps=["计划", "检索", "报告"], allowed_tools=["local_search"], fallback="停止并报告。",
+        source_modes=["web"], created_from_runs=[run.run_id], triggers=["研究"], inputs=["问题"],
+        steps=["计划", "Web 检索", "报告"], allowed_tools=["tavily_search"], fallback="停止并报告。",
         verification=["citation_integrity"], anti_patterns=["重复"], stop_conditions=["预算耗尽"],
     )
     candidate = await registry.register_candidate(run_id=run.run_id, spec=skill, eval_cases=[{}, {}, {}])
@@ -243,17 +243,17 @@ async def test_canary_regression_auto_suspends(env):
 def test_plan_execute_driver_injects_policy_into_all_stage_contexts():
     context = RunContext(
         run_id="run-policy", session_id="session-policy", trigger_message_id="message-policy",
-        source_mode=SourceMode.GRAPHRAG, workflow_mode=WorkflowMode.PLAN_EXECUTE_REPORT,
+        source_mode=SourceMode.WEB, workflow_mode=WorkflowMode.PLAN_EXECUTE_REPORT,
         status="planning", original_query="研究问题", resolved_query="研究问题",
         context_snapshot={"selected_skill": {
             "name": "bounded-policy", "version": "1.0.0", "content": "skill",
-            "allowed_tools": ["local_search"],
+            "allowed_tools": ["web_search"],
             "machine_policy": {
                 "planner": {"required_plan_rules": ["先拆解"]},
                 "worker": {"max_retries": 2}, "reflection": {"recovery_rules": ["证据不足时补检索"]},
                 "reporter": {"section_context_policy": {"max_cards": 10}},
                 "verifier": {"required_checks": ["citation_integrity"]},
-                "permissions": {"allowed_tools": ["local_search"], "allowed_sources": ["graphrag"]},
+                "permissions": {"allowed_tools": ["web_search"], "allowed_sources": ["web"]},
             },
         }},
     )

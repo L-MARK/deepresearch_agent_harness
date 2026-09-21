@@ -1,4 +1,4 @@
-export type SourceMode = "graphrag" | "web";
+export type SourceMode = "web";
 export type WorkflowMode = "deep_research" | "plan_execute_report";
 
 export interface Session { session_id: string; title: string; status: string; memory_snapshot_version?: number | null; memory_snapshot_created_at?: string | null; created_at: string; updated_at: string; }
@@ -47,7 +47,7 @@ export interface WhiteboardLog {
   counts: {messages: number; runs: number; events: number; tools: number};
 }
 export interface Capability { available: boolean; reason?: string | null; }
-export interface Capabilities { sources: Record<SourceMode, Capability>; workflows: WorkflowMode[]; default_source_mode: SourceMode; }
+export interface Capabilities { sources: { web: Capability }; workflows: WorkflowMode[]; default_source_mode: "web"; }
 
 export interface CuratedMemory {
   memory_id: string; target: "user" | "project"; kind: string; content: string;

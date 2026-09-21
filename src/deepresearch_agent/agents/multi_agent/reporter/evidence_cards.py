@@ -16,7 +16,7 @@ from deepresearch_agent.context.tokens import count_tokens
 class EvidenceCard(BaseModel):
     evidence_id: str
     source_id: str
-    source_mode: str = "graphrag"
+    source_mode: str = "web"
     url: str | None = None
     domain: str | None = None
     title: str | None = None
@@ -312,7 +312,7 @@ class EvidenceCardPipeline:
             evidence=payload,
             metadata={
                 "source_id": card.source_id,
-                "source_type": "webpage" if card.source_mode == "web" else "chunk",
+                "source_type": "webpage",
                 "title": card.title,
                 "url": card.url,
                 "domain": card.domain,
@@ -320,7 +320,7 @@ class EvidenceCardPipeline:
                 "confidence": 0.8,
             },
             source="custom",
-            source_mode="web" if card.source_mode == "web" else "graphrag",
+            source_mode="web",
             score=0.8,
         )
 
@@ -336,7 +336,7 @@ class EvidenceCardPipeline:
             ),
             metadata={
                 "source_id": first.source_id,
-                "source_type": "webpage" if first.source_mode == "web" else "chunk",
+                "source_type": "webpage",
                 "title": f"Evidence Digest ({len(digest.evidence_ids)} items)",
                 "url": first.url,
                 "domain": first.domain,
@@ -344,7 +344,7 @@ class EvidenceCardPipeline:
                 "confidence": 0.8,
             },
             source="custom",
-            source_mode="web" if first.source_mode == "web" else "graphrag",
+            source_mode="web",
             score=0.8,
         )
 

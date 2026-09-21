@@ -12,25 +12,15 @@ from pydantic import BaseModel, Field, field_validator
 from collections import deque, defaultdict
 
 TASK_TYPE_CHOICES: Tuple[str, ...] = (
-    "local_search",
-    "global_search",
-    "hybrid_search",
-    "naive_search",
     "deep_research",
     "deeper_research",
-    "chain_exploration",
     "reflection",
     "web_search",
 )
 
 TaskTypeLiteral = Literal[
-    "local_search",
-    "global_search",
-    "hybrid_search",
-    "naive_search",
     "deep_research",
     "deeper_research",
-    "chain_exploration",
     "reflection",
     "web_search",
 ]
@@ -79,8 +69,8 @@ class TaskNode(BaseModel):
     # 任务类型
     task_type: TaskTypeLiteral = Field(description="任务类型")
 
-    source_mode: Literal["graphrag", "web"] = Field(
-        default="graphrag",
+    source_mode: Literal["web"] = Field(
+        default="web",
         description="任务冻结的信息源",
     )
 
@@ -105,7 +95,7 @@ class TaskNode(BaseModel):
         description="任务执行所需的参数"
     )
 
-    # 相关实体（用于chain_exploration等类型）
+    # 可选的查询实体提示
     entities: List[str] = Field(
         default_factory=list,
         description="任务相关的实体列表"
@@ -313,8 +303,8 @@ class PlanSpec(BaseModel):
     # 版本号
     version: int = Field(default=1, description="计划版本号")
 
-    source_mode: Literal["graphrag", "web"] = Field(
-        default="graphrag",
+    source_mode: Literal["web"] = Field(
+        default="web",
         description="Run 冻结的信息源",
     )
 
@@ -429,7 +419,7 @@ class PlanExecutionSignal(BaseModel):
     """
     plan_id: str = Field(description="计划唯一标识")
     version: int = Field(description="计划版本号")
-    source_mode: Literal["graphrag", "web"] = Field(default="graphrag", description="冻结的信息源")
+    source_mode: Literal["web"] = Field(default="web", description="冻结的信息源")
     execution_mode: Literal["sequential", "parallel"] = Field(description="建议执行模式")
     tasks: List[Dict[str, Any]] = Field(description="任务节点详细信息列表")
     execution_sequence: List[str] = Field(description="拓扑排序后的任务执行顺序")

@@ -11,7 +11,6 @@ from deepresearch_agent.harness.errors import AppError, ErrorCode
 
 class SourcePolicy:
     ALLOWED_TOOLSETS = {
-        SourceMode.GRAPHRAG: {"local_search", "global_search", "hybrid_search", "naive_search", "chain_exploration"},
         SourceMode.WEB: {"tavily_search", "web_search"},
     }
     WEB_ALLOWED_ARGUMENTS = {

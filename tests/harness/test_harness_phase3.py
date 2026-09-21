@@ -34,7 +34,7 @@ async def database(tmp_path):
 
 async def create_run(
     database, *, budget=None,
-    source_mode=SourceMode.GRAPHRAG,
+    source_mode=SourceMode.WEB,
     workflow_mode=WorkflowMode.DEEP_RESEARCH,
     min_evidence=1,
 ):
@@ -65,15 +65,15 @@ class FakeDriver:
         self.plan_task_count = plan_task_count
         self.token_count = token_count
         self.mode = context.source_mode.value
-        self.tool_name = "tavily_search" if self.mode == "web" else "local_search"
+        self.tool_name = "tavily_search"
         self.results = [
             RetrievalResult(
                 result_id=item_id, granularity="Chunk", evidence=f"evidence-{index}",
                 metadata=RetrievalMetadata(
-                    source_id=(f"https://example.com/source-{index}" if self.mode == "web" else f"doc-{index}"),
-                    source_type=("webpage" if self.mode == "web" else "chunk"),
+                    source_id=f"https://example.com/source-{index}",
+                    source_type="webpage",
                     title=f"source-{index}",
-                    url=(f"https://example.com/source-{index}" if self.mode == "web" else None),
+                    url=f"https://example.com/source-{index}",
                     content_hash=f"{'a' if index == 1 else 'b'}" * 64,
                 ),
                 source=self.tool_name, source_mode=self.mode, score=0.9,
@@ -199,7 +199,7 @@ class ZeroEvidenceDriver(FakeDriver):
         task_id = f"task-{self.context.run_id}-{next_index}"
         tasks = [{
             "task_id": task_id,
-            "task_type": "local_search",
+            "task_type": "web_search",
             "source_mode": self.mode,
             "status": "pending",
             "description": "no evidence probe",
@@ -322,7 +322,6 @@ def test_real_deep_research_agent_ask_accepts_and_forwards_bypass_cache(monkeypa
     # 仅构造最小实例，避免 __init__ 初始化 DeepResearchTool 的外部依赖
     agent = DeepResearchAgent.__new__(DeepResearchAgent)
     agent.show_thinking = False
-    agent.use_deeper_tool = False
 
     calls = []
 
@@ -341,7 +340,7 @@ def test_real_deep_research_agent_ask_accepts_and_forwards_bypass_cache(monkeypa
 async def test_required_contract_failure_never_completes(database):
     _, run = await create_run(database)
     evaluator = ContractEvaluator(ContractRepository(database))
-    verdict = await evaluator.evaluate(run_id=run.run_id, source_mode="graphrag", report="# 空报告", evidence=[], consistency_passed=True)
+    verdict = await evaluator.evaluate(run_id=run.run_id, source_mode="web", report="# 空报告", evidence=[], consistency_passed=True)
     assert not verdict.passed
     with pytest.raises(ValueError):
         await RunRepository(database).complete_verified(run.run_id, assistant_content="bad", usage={})
@@ -444,7 +443,7 @@ async def test_zero_evidence_replans_once_then_fails_fast_without_report(databas
     _, run = await create_run(
         database,
         budget=BudgetLimits(max_replans=2).model_dump(),
-        source_mode=SourceMode.GRAPHRAG,
+        source_mode=SourceMode.WEB,
         workflow_mode=WorkflowMode.PLAN_EXECUTE_REPORT,
     )
     result = await build_runtime(database, tmp_path, lambda ctx, events=None: ZeroEvidenceDriver(ctx)).execute_run(run.run_id)
@@ -455,7 +454,7 @@ async def test_zero_evidence_replans_once_then_fails_fast_without_report(databas
     assert ZeroEvidenceDriver.report_calls == 0
     stored = await RunRepository(database).get(run.run_id)
     assert stored.error_code == "NO_SOURCE_EVIDENCE"
-    assert "导入与该主题相关的私域资料" in stored.error_message
+    assert "Web" in stored.error_message or "证据" in stored.error_message
     events = await EventRepository(database).list_after(run.run_id)
     names = [event.event_type for event in events]
     assert names.count("source.coverage_checked") == 2
@@ -469,7 +468,7 @@ async def test_insufficient_evidence_for_detailed_report_fails_before_reporting(
     _, run = await create_run(
         database,
         budget=BudgetLimits(max_replans=2).model_dump(),
-        source_mode=SourceMode.GRAPHRAG,
+        source_mode=SourceMode.WEB,
         workflow_mode=WorkflowMode.PLAN_EXECUTE_REPORT,
         min_evidence=3,
     )
@@ -556,7 +555,7 @@ async def test_interrupted_executing_checkpoint_resumes_without_reexecuting_comp
     message, run = await create_run(database)
     context = RunContext(
         run_id=run.run_id, session_id=run.session_id, trigger_message_id=message.message_id,
-        source_mode=SourceMode.GRAPHRAG, workflow_mode=WorkflowMode.DEEP_RESEARCH,
+        source_mode=SourceMode.WEB, workflow_mode=WorkflowMode.DEEP_RESEARCH,
         status=RunStatus.EXECUTING, original_query=message.content, budget_limits=BudgetLimits(),
         workflow_state={"executed": True, "results": []},
     )
@@ -586,7 +585,7 @@ async def test_interrupted_stage_resumes_after_latest_safe_checkpoint(
     message, run = await create_run(database)
     context = RunContext(
         run_id=run.run_id, session_id=run.session_id, trigger_message_id=message.message_id,
-        source_mode=SourceMode.GRAPHRAG, workflow_mode=WorkflowMode.DEEP_RESEARCH,
+        source_mode=SourceMode.WEB, workflow_mode=WorkflowMode.DEEP_RESEARCH,
         status=checkpoint_status, original_query=message.content, budget_limits=BudgetLimits(),
         workflow_state=workflow_state,
         report=workflow_state.get("report"),
@@ -595,7 +594,7 @@ async def test_interrupted_stage_resumes_after_latest_safe_checkpoint(
         prepared = FakeDriver(context)
         EvidenceLedger().assign(
             run_id=run.run_id, task_id=f"task-{run.run_id}",
-            tool_call_id=f"call-{run.run_id}-0", provider="local_search",
+            tool_call_id=f"call-{run.run_id}-0", provider="tavily_search",
             results=prepared.results,
         )
         context.workflow_state = prepared.snapshot()
@@ -642,7 +641,7 @@ async def test_final_assistant_message_is_idempotent(database, tmp_path):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("source_mode", [SourceMode.GRAPHRAG, SourceMode.WEB])
+@pytest.mark.parametrize("source_mode", [SourceMode.WEB])
 @pytest.mark.parametrize("workflow_mode", [WorkflowMode.DEEP_RESEARCH, WorkflowMode.PLAN_EXECUTE_REPORT])
 @pytest.mark.parametrize("sample", range(3))
 async def test_each_workflow_source_combination_has_three_complete_harness_samples(

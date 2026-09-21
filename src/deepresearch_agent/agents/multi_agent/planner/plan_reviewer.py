@@ -66,7 +66,7 @@ class PlanReviewer:
         assumptions: list[str],
         background_info: Optional[str] = None,
         user_intent: Optional[str] = None,
-        source_mode: str = "graphrag",
+        source_mode: str = "web",
     ) -> PlanReviewOutcome:
         """
         对任务图执行审校并输出PlanSpec

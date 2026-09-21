@@ -3,14 +3,9 @@ chardet==3.0.4
 fastapi==0.115.11
 faiss-cpu==1.11.0
 google-auth==2.38.0
-graphdatascience==1.12
-hanlp==2.1.1
-httplib2==0.22.0
-jieba==0.42.1
 langchain==0.3.21
 langchain_community==0.3.20
 langchain_core==0.3.46
-langchain_neo4j==0.4.0
 langchain_openai==0.3.9
 langgraph==0.3.18
 langsmith==0.3.18
@@ -21,11 +16,8 @@ numpy==1.26.2
 pandas==2.2.3
 psutil==5.9.7
 pydantic==2.10.6
-PyPDF2>=3.0.0
-python-docx>=0.8.11
 python-dotenv==1.0.1
 pyyaml>=6.0
-pyvis==0.3.2
 Requests==2.32.3
 rich==13.9.4
 schedule==1.2.2
@@ -46,9 +38,6 @@ tavily-python>=0.5,<1.0
 tenacity>=9.0,<10.0
 pytest>=8.0,<9.0
 pytest-asyncio>=0.23,<1.0
-
-# linux: sudo apt-get install python-dev-is-python3 libxml2-dev libxslt1-dev antiword unrtf poppler-utils
-textract==1.6.3
 
 # windows
 # pywin32>=302

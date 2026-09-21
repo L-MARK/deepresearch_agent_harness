@@ -83,11 +83,11 @@ class DeterministicRecoveryDriver:
                 evidence=f"Durable recovery evidence {index}",
                 metadata=RetrievalMetadata(
                     source_id=f"recovery-doc-{index}",
-                    source_type="chunk",
+                source_type="webpage",
                     content_hash=character * 64,
                 ),
-                source="local_search",
-                source_mode="graphrag",
+                source="tavily_search",
+                source_mode="web",
                 score=0.95,
             )
             for index, character in ((1, "a"), (2, "b"))
@@ -133,9 +133,9 @@ class DeterministicRecoveryDriver:
         if not self.executed:
             return []
         call = ToolCall(
-            tool_name="local_search",
+            tool_name="tavily_search",
             tool_call_id=f"call-{self.context.run_id}",
-            source_mode="graphrag",
+            source_mode="web",
             args={"query": "durable recovery"},
             result={"ok": True},
         )
@@ -161,7 +161,7 @@ class DeterministicRecoveryDriver:
             (
                 f"task-{self.context.run_id}",
                 f"call-{self.context.run_id}",
-                "local_search",
+                "tavily_search",
                 item,
             )
             for item in self.results
@@ -174,7 +174,7 @@ class DeterministicRecoveryDriver:
         task = {
             "task_id": f"task-{self.context.run_id}",
             "task_type": "deep_research",
-            "source_mode": "graphrag",
+            "source_mode": "web",
             "status": "pending",
             "description": "evaluate durable recovery",
         }
@@ -267,7 +267,7 @@ async def _create_run(database_url: str, stage: str, repetition: int, marker: Pa
             RunCreate(
                 session_id=session.session_id,
                 trigger_message_id="atomic",
-                source_mode=SourceMode.GRAPHRAG,
+                source_mode=SourceMode.WEB,
                 workflow_mode=WorkflowMode.DEEP_RESEARCH,
                 config_snapshot={
                     "min_evidence": 1,
@@ -418,7 +418,7 @@ def _render_markdown(payload: dict[str, Any]) -> str:
             "",
             "## 限制",
             "",
-            "- 使用确定性离线 Driver，避免把 LLM/Tavily/Neo4j 的波动混入恢复指标。",
+            "- 使用确定性离线 Driver，避免把 LLM/Tavily 的波动混入恢复指标。",
             "- 注入点位于阶段安全 Checkpoint 提交后，未覆盖 SQLite 提交中途的磁盘损坏、操作系统断电或跨机器恢复。",
             "- 租约 TTL 为 1 秒以缩短评测时间；生产默认租约更长，因此生产自动接管时间会相应增加。",
             "- 样本量有限，100% 点估计不代表真实总体必然为 100%，应结合 Wilson 区间解释。",

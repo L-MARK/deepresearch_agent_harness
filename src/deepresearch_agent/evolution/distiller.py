@@ -39,7 +39,9 @@ class TrajectoryDistiller:
         else:
             digest = hashlib.sha256(trigger.content.encode("utf-8")).hexdigest()[:8]
             name, version = f"research-{run.source_mode}-{digest}", "0.1.0"
-        allowed_tools = ["tavily_search"] if run.source_mode == "web" else ["local_search", "hybrid_search"]
+        if run.source_mode != "web":
+            return None
+        allowed_tools = ["tavily_search", "deep_research"]
         spec = SkillSpec(
             name=name, description=f"复用已验证的{run.source_mode}研究轨迹，完成问题拆解、同源检索、引用报告和完成验证。",
             version=version, source_modes=[run.source_mode], created_from_runs=[run_id],

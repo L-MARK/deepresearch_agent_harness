@@ -237,11 +237,7 @@ class HarnessRuntime:
                             await self.checkpoints.save(context, "replanning")
                             continue
 
-                        source_hint = (
-                            "请导入与该主题相关的私域资料，或改用联网搜索。"
-                            if context.source_mode is SourceMode.GRAPHRAG
-                            else "请调整问题或检查联网检索配置。"
-                        )
+                        source_hint = "请调整问题或检查联网检索配置。"
                         error_code = "NO_SOURCE_EVIDENCE" if evidence_count == 0 else "INSUFFICIENT_SOURCE_EVIDENCE"
                         evidence_summary = (
                             "未检索到可支持该问题的证据"

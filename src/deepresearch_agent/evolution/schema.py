@@ -14,7 +14,7 @@ class SkillSpec(BaseModel):
     description: str = Field(min_length=10, max_length=500)
     version: str = Field(pattern=r"^\d+\.\d+\.\d+$")
     status: Literal["candidate", "evaluated", "shadow", "canary", "active", "previous", "suspended", "deprecated"] = "candidate"
-    source_modes: list[Literal["graphrag", "web"]]
+    source_modes: list[Literal["web"]]
     created_from_runs: list[str]
     triggers: list[str] = Field(min_length=1)
     inputs: list[str] = Field(min_length=1)

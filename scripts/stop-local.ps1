@@ -34,5 +34,5 @@ $remaining = Get-NetTCPConnection -LocalPort 5173 -State Listen -ErrorAction Sil
 if ($remaining) {
   Write-Warning "Port 5173 is still in use. Run 'netstat -ano | findstr :5173' and inspect the owning process."
 } else {
-  Write-Host "Local backend/frontend stopped. Use 'docker compose stop neo4j' to stop Neo4j."
+  Write-Host "Local Web-only backend/frontend stopped."
 }

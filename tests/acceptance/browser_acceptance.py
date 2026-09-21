@@ -16,7 +16,7 @@ import sys
 import time
 from pathlib import Path
 
-from playwright.sync_api import Error as PlaywrightError, sync_playwright
+from playwright.sync_api import Error as PlaywrightError, Page, sync_playwright
 
 FRONTEND = "http://127.0.0.1:5173/"
 OUT = Path("data/acceptance/ui")
@@ -78,9 +78,7 @@ def main() -> int:
             shot(page, "04_status.png")
             print("[ui] skipped real run; status page:", results["status_page"])
         else:
-            # 3) 切换到联网搜索并发送问题
-            page.locator("label", has_text="联网搜索").click()
-            time.sleep(0.3)
+            # 3) Web 来源固定启用，直接发送问题
             page.locator("textarea").fill(QUESTION)
             page.get_by_role("button", name="发送研究 →").click()
             print(f"[ui] submitted question, waiting up to {RUN_TIMEOUT_SECONDS}s for run…")

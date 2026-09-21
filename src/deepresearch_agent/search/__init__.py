@@ -1,18 +1,9 @@
-"""Search package with lazy public exports.
-
-Keeping imports lazy lets a Web-only process start without initializing Neo4j.
-"""
+"""Web search package with lazy public exports."""
 
 from importlib import import_module
 
 
 _EXPORTS = {
-    "LocalSearch": ("deepresearch_agent.search.local_search", "LocalSearch"),
-    "GlobalSearch": ("deepresearch_agent.search.global_search", "GlobalSearch"),
-    "LocalSearchTool": ("deepresearch_agent.search.tool.local_search_tool", "LocalSearchTool"),
-    "GlobalSearchTool": ("deepresearch_agent.search.tool.global_search_tool", "GlobalSearchTool"),
-    "HybridSearchTool": ("deepresearch_agent.search.tool.hybrid_tool", "HybridSearchTool"),
-    "NaiveSearchTool": ("deepresearch_agent.search.tool.naive_search_tool", "NaiveSearchTool"),
     "DeepResearchTool": ("deepresearch_agent.search.tool.deep_research_tool", "DeepResearchTool"),
 }
 

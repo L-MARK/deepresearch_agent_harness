@@ -86,7 +86,7 @@ class ReflectionExecutor(BaseExecutor):
                 if validation_tool is None:
                     validation_tool = self._validation_tools.setdefault(
                         state.source_mode,
-                        AnswerValidationTool(enable_graph=state.source_mode == "graphrag"),
+                        AnswerValidationTool(),
                     )
                 validation_payload = validation_tool.validate(
                     query,

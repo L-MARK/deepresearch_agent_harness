@@ -48,7 +48,7 @@ def create_app(
         await run_service.shutdown()
         await database.close()
 
-    app = FastAPI(title="DeepResearch HybridRAG Local MVP", version="0.4.0", lifespan=lifespan)
+    app = FastAPI(title="DeepResearch Web Research MVP", version="0.4.0", lifespan=lifespan)
     app.state.database = database
     app.state.run_service = run_service
     app.state.chat_service = ChatService(

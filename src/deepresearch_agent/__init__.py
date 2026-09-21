@@ -1,4 +1,4 @@
-"""Standalone DeepResearch HybridRAG runtime package."""
+"""Standalone Web research runtime package."""
 
 __version__ = "0.1.0"
 

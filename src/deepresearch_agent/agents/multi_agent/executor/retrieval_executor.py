@@ -1,7 +1,7 @@
 """
 检索执行器
 
-负责解析PlanExecutionSignal中的检索类任务并调用既有搜索工具（local/global/chain等）。
+负责解析 PlanExecutionSignal 中的 Web 检索类任务。
 """
 from typing import Any, Dict, List, Optional
 import time
@@ -42,19 +42,12 @@ class RetrievalExecutor(BaseExecutor):
 
     def __init__(
         self,
-        tool_registry: Optional[Dict[str, Any]] = None,
-        extra_tool_factories: Optional[Dict[str, Any]] = None,
-        *,
         provider: Optional[RetrievalProvider] = None,
         router: Optional[RetrievalRouter] = None,
         source_policy: Optional[SourcePolicy] = None,
         evidence_ledger: Optional[EvidenceLedger] = None,
     ) -> None:
         super().__init__()
-        self._tool_registry = dict(tool_registry) if tool_registry is not None else None
-        self._extra_factories = dict(extra_tool_factories) if extra_tool_factories is not None else None
-        self._tool_cache: Dict[str, Any] = {}
-        self._extra_cache: Dict[str, Any] = {}
         self._provider = provider
         self._router = router or (None if provider is not None else create_default_router())
         self._source_policy = source_policy or SourcePolicy()
@@ -62,8 +55,7 @@ class RetrievalExecutor(BaseExecutor):
 
     def can_handle(self, task_type: str) -> bool:
         return task_type in {
-            "local_search", "global_search", "hybrid_search", "naive_search",
-            "web_search", "deep_research", "deeper_research", "chain_exploration",
+            "web_search", "deep_research", "deeper_research",
         }
 
     def execute_task(
@@ -98,15 +90,12 @@ class RetrievalExecutor(BaseExecutor):
         try:
             if tool_name in {"deep_research", "deeper_research"}:
                 structured_output = self._invoke_research_tool(provider, tool_name, payload, state.run_id)
-            elif tool_name in {"local_search", "global_search", "hybrid_search", "naive_search", "web_search"}:
+            elif tool_name == "web_search":
                 structured_output = self._invoke_provider(
                     provider, tool_name, payload, state, task, tool_call_id
                 )
             else:
-                # Graph-only legacy specialist tools remain available, but are source-gated.
-                self._source_policy.assert_tool_allowed(SourceMode(state.source_mode), tool_name)
-                tool_instance = self._get_tool_instance(tool_name)
-                structured_output = self._invoke_tool(tool_instance, tool_name, payload)
+                raise ValueError(f"不支持的 Web 检索任务类型: {tool_name}")
         except Exception as exc:  # noqa: BLE001
             success = False
             error_message = str(exc)
@@ -172,15 +161,14 @@ class RetrievalExecutor(BaseExecutor):
         task: TaskNode,
         tool_call_id: str,
     ) -> Dict[str, Any]:
-        actual_tool = "tavily_search" if provider.mode == SourceMode.WEB else task_type
-        self._source_policy.assert_tool_allowed(provider.mode, actual_tool)
+        actual_tool = "tavily_search"
+        self._source_policy.assert_tool_allowed(SourceMode.WEB, actual_tool)
         query = str(payload.get("query") or task.description)
         results = run_async_from_sync(lambda: provider.search(
             query,
             top_k=int(payload.get("top_k") or 5),
             search_depth=payload.get("search_depth", "advanced"),
             filters=SearchFilters(
-                strategy=task_type if provider.mode == SourceMode.GRAPHRAG else None,
                 include_domains=tuple(payload.get("include_domains") or ()),
                 exclude_domains=tuple(payload.get("exclude_domains") or ()),
                 start_date=payload.get("start_date"),
@@ -212,15 +200,9 @@ class RetrievalExecutor(BaseExecutor):
     ) -> Dict[str, Any]:
         from deepresearch_agent.search.tool.deep_research_tool import DeepResearchTool
 
-        if task_type == "deeper_research" and provider.mode == SourceMode.GRAPHRAG:
-            from deepresearch_agent.search.tool.deeper_research_tool import DeeperResearchTool
-            tool = DeeperResearchTool(provider=provider, run_id=run_id)
-        else:
-            tool = DeepResearchTool(provider=provider, run_id=run_id)
+        tool = DeepResearchTool(provider=provider, run_id=run_id)
         raw = tool.search(payload)
         provider_results = getattr(tool, "provider_results", None)
-        if provider_results is None and hasattr(tool, "deep_research"):
-            provider_results = getattr(tool.deep_research, "provider_results", [])
         return {
             "answer": raw if isinstance(raw, str) else raw.get("answer", str(raw)),
             "raw_result": raw,
@@ -228,50 +210,6 @@ class RetrievalExecutor(BaseExecutor):
             "provider": provider.provider_name,
             "source_mode": provider.mode.value,
         }
-
-    def _get_tool_instance(self, task_type: str) -> Any:
-        if self._tool_registry is None or self._extra_factories is None:
-            from deepresearch_agent.search.tool_registry import TOOL_REGISTRY, EXTRA_TOOL_FACTORIES
-            if self._tool_registry is None:
-                self._tool_registry = dict(TOOL_REGISTRY)
-            if self._extra_factories is None:
-                self._extra_factories = dict(EXTRA_TOOL_FACTORIES)
-        if task_type in self._tool_registry:
-            if task_type not in self._tool_cache:
-                self._tool_cache[task_type] = self._tool_registry[task_type]()
-            return self._tool_cache[task_type]
-        if task_type in self._extra_factories:
-            if task_type not in self._extra_cache:
-                factory = self._extra_factories[task_type]
-                self._extra_cache[task_type] = factory()
-            return self._extra_cache[task_type]
-        raise KeyError(f"未找到任务类型 {task_type} 对应的检索工具")
-
-    def _invoke_tool(self, tool: Any, task_type: str, payload: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        调用具体的检索工具。
-
-        优先使用structured_search，其次使用search，特殊工具（如chain_exploration）调用自定义方法。
-        """
-        if hasattr(tool, "structured_search"):
-            return tool.structured_search(payload)
-        if hasattr(tool, "search"):
-            result = tool.search(payload)
-            if isinstance(result, dict):
-                return result
-            return {"answer": result, "retrieval_results": []}
-        if task_type == "chain_exploration" and hasattr(tool, "explore"):
-            query = payload.get("query")
-            start_entities = payload.get("start_entities") or payload.get("entities")
-            max_steps = payload.get("max_steps")
-            exploration_width = payload.get("exploration_width")
-            return tool.explore(
-                query=query,
-                start_entities=start_entities,
-                max_steps=max_steps,
-                exploration_width=exploration_width,
-            )
-        raise ValueError(f"任务类型 {task_type} 未提供可用的执行方法")
 
     def _extract_evidence(
         self,
