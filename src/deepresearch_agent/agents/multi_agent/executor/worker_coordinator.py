@@ -30,6 +30,7 @@ from deepresearch_agent.config.settings import (
 )
 from deepresearch_agent.retrieval.base import RetrievalProvider
 from deepresearch_agent.retrieval.router import RetrievalRouter
+from deepresearch_agent.context.compression import EvidenceContextCompressor
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -50,11 +51,12 @@ class WorkerCoordinator:
         max_parallel_workers: Optional[int] = None,
         retrieval_provider: Optional[RetrievalProvider] = None,
         retrieval_router: Optional[RetrievalRouter] = None,
+        evidence_context_compressor: Optional[EvidenceContextCompressor] = None,
     ) -> None:
         if executors is None:
             executors = [
                 RetrievalExecutor(provider=retrieval_provider, router=retrieval_router),
-                ReflectionExecutor(),
+                ReflectionExecutor(evidence_context_compressor=evidence_context_compressor),
             ]
         self.executors = executors
         configured_mode = (
@@ -249,7 +251,7 @@ class WorkerCoordinator:
                         task_status[task_id] = "failed"
                         pending.remove(task_id)
                         scheduled_this_round = True
-                    # dependency 未完成，等待下一轮
+                    # 依赖尚未完成，等待下一轮。
 
                 if inflight:
                     done, _ = wait(inflight.keys(), return_when=FIRST_COMPLETED)
@@ -275,8 +277,8 @@ class WorkerCoordinator:
                             task_status[task_id] = "failed"
                         scheduled_this_round = True
 
-                    # Workers never mutate the shared state. The coordinator merges a
-                    # completed batch in plan order, making checkpoints deterministic.
+                    # Worker 永远不直接修改共享状态。
+                    # Coordinator 按计划顺序合并已完成批次，使检查点结果保持确定性。
                     for task_id, success, isolated_state, isolated_records in sorted(
                         completed_batch, key=lambda item: sequence_index[item[0]]
                     ):
@@ -320,7 +322,7 @@ class WorkerCoordinator:
         task: TaskNode,
         task_map: Dict[str, TaskNode],
     ) -> Tuple[bool, Optional[str], PlanExecuteState, List[ExecutionRecord]]:
-        """Execute one worker against a deep state snapshot, never shared state."""
+        """在深拷贝状态快照上执行一个 Worker，绝不直接使用共享状态。"""
         isolated_state = shared_state.model_copy(deep=True)
         isolated_results: List[ExecutionRecord] = []
         success, reason = self._execute_single_task(
@@ -341,7 +343,7 @@ class WorkerCoordinator:
         task_id: str,
         records: List[ExecutionRecord],
     ) -> None:
-        """Apply a worker's local delta on the coordinator thread."""
+        """在 Coordinator 线程中应用 Worker 产生的局部状态变化。"""
         existing_record_ids = {record.record_id for record in shared_state.execution_records}
         for record in records:
             if record.record_id not in existing_record_ids:

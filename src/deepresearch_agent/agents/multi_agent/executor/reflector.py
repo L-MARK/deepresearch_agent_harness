@@ -21,6 +21,7 @@ from deepresearch_agent.agents.multi_agent.core.plan_spec import (
 from deepresearch_agent.agents.multi_agent.core.state import PlanExecuteState
 from deepresearch_agent.agents.multi_agent.executor.base_executor import BaseExecutor, TaskExecutionResult
 from deepresearch_agent.search.tool.validation_tool import AnswerValidationTool
+from deepresearch_agent.context.compression import EvidenceContextCompressor
 
 
 class ReflectionExecutor(BaseExecutor):
@@ -34,9 +35,11 @@ class ReflectionExecutor(BaseExecutor):
         self,
         *,
         validation_tool: Optional[AnswerValidationTool] = None,
+        evidence_context_compressor: Optional[EvidenceContextCompressor] = None,
     ) -> None:
         super().__init__()
         self._validation_tool = validation_tool
+        self._evidence_context_compressor = evidence_context_compressor or EvidenceContextCompressor()
         self._validation_tools: Dict[str, AnswerValidationTool] = {}
 
     def can_handle(self, task_type: str) -> bool:
@@ -52,6 +55,7 @@ class ReflectionExecutor(BaseExecutor):
         对指定任务结果进行反思与验证。
         """
         payload = self.build_default_inputs(task)
+        evidence_pack = self._ensure_evidence_context(state)
         query, answer, target_task_id = self._resolve_query_answer(
             state, payload, current_task_id=task.task_id
         )
@@ -92,6 +96,7 @@ class ReflectionExecutor(BaseExecutor):
                     query,
                     evaluation_text,
                     reference_keywords=reference_keywords,
+                    context_pack=evidence_pack,
                 )
                 validation_result = validation_payload.get("validation", {})
                 validation_passed = bool(validation_result.get("passed", False))
@@ -187,6 +192,7 @@ class ReflectionExecutor(BaseExecutor):
                 "query": query,
                 "answer": answer,
                 "evaluation_text": evaluation_text,
+                "evidence_context_pack": evidence_pack,
             },
             tool_calls=tool_calls,
             reflection=reflection,
@@ -208,6 +214,34 @@ class ReflectionExecutor(BaseExecutor):
             success=error is None,
             error=error,
         )
+
+    def _ensure_evidence_context(self, state: PlanExecuteState) -> Dict[str, Any]:
+        """Build the pack immediately before the actual reflection validator runs."""
+        if not self._evidence_context_compressor.enabled:
+            return {"schema_version": 1, "compression_status": "disabled", "content": ""}
+        existing = state.context_snapshot.get("worker_reflection_context_pack") if state.context_snapshot else None
+        if isinstance(existing, dict) and existing.get("content"):
+            return existing
+        execution_context = state.execution_context
+        retrieval_results: list[Any] = []
+        if execution_context is not None:
+            for value in execution_context.retrieval_cache.values():
+                if isinstance(value, list):
+                    retrieval_results.extend(value)
+                elif value is not None:
+                    retrieval_results.append(value)
+        objective = state.plan_context.refined_query or state.plan_context.original_query or state.input
+        pack = self._evidence_context_compressor.compress(
+            research_objective=objective,
+            plan=state.plan,
+            task_records=state.execution_records,
+            retrieval_results=retrieval_results,
+            evidence_ledger=(execution_context.evidence_registry.values() if execution_context else []),
+            current_constraints=state.plan_context.active_constraints,
+        ).to_dict()
+        state.context_snapshot["worker_reflection_context_pack"] = pack
+        state.context_snapshot["evidence_context_budget"] = pack.get("budget", {})
+        return pack
 
     def _resolve_query_answer(
         self,

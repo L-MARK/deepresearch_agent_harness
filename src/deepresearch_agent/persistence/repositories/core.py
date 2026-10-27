@@ -1,4 +1,4 @@
-"""Session, message, run and event repositories."""
+"""Session、消息、Run 和事件 Repository。"""
 
 from __future__ import annotations
 
@@ -30,7 +30,7 @@ class SessionRepository:
         return model
 
     async def freeze_memory_snapshot(self, session_id: str, snapshot: dict[str, Any], version: int) -> Optional[SessionModel]:
-        """Persist the first curated-memory snapshot for a Session.
+        """持久化 Session 的第一份精选 Memory 快照。
 
         The conditional update is deliberate: memory writes made later in the
         Session must not mutate its stable prompt prefix.
@@ -146,9 +146,16 @@ class MessageRepository:
 
     async def get_assistant_for_run(self, run_id: str) -> Optional[MessageModel]:
         async with self.database.sessions() as session:
-            return (await session.execute(
+            messages = list((await session.execute(
                 select(MessageModel).where(MessageModel.run_id == run_id, MessageModel.role == "assistant")
-            )).scalar_one_or_none()
+                .order_by(MessageModel.created_at.desc(), MessageModel.message_id.desc())
+            )).scalars())
+            # 澄清请求也是 assistant 消息，但不是最终报告；只有经过
+            # Completion Contract 的 verified 消息才应出现在 report API。
+            for message in messages:
+                if json.loads(message.metadata_json or "{}").get("verified") is True:
+                    return message
+            return None
 
     async def search(self, query: str, *, session_id: Optional[str] = None, limit: int = 20) -> list[MessageModel]:
         clause = "messages_fts MATCH :query"
@@ -183,7 +190,7 @@ class RunRepository:
         return model
 
     async def create_for_user_message(self, message: MessageCreate, run: RunCreate) -> tuple[MessageModel, RunModel, bool]:
-        """Atomically apply idempotency, user message, queued Run and queued event."""
+        """原子地处理幂等性、用户消息、排队中的 Run 和排队事件。"""
         if message.role != "user" or message.session_id != run.session_id:
             raise ValueError("原子创建仅接受同一 Session 的 user message")
         async with self.database.transaction() as session:
@@ -215,8 +222,18 @@ class RunRepository:
             result = await session.execute(select(RunModel).where(RunModel.session_id == session_id).order_by(RunModel.created_at.desc()).limit(max(1, min(limit, 200))).offset(max(0, offset)))
             return list(result.scalars())
 
+    async def latest_for_session(self, session_id: str) -> Optional[RunModel]:
+        """返回会话中最近创建的唯一 Run，用于控制消息与 Run 的边界。"""
+        async with self.database.sessions() as session:
+            return (await session.execute(
+                select(RunModel)
+                .where(RunModel.session_id == session_id)
+                .order_by(RunModel.created_at.desc(), RunModel.run_id.desc())
+                .limit(1)
+            )).scalar_one_or_none()
+
     async def update_status(self, run_id: str, *, status: str, current_stage: Optional[str] = None, error_code: Optional[str] = None, error_message: Optional[str] = None, usage: Optional[dict[str, Any]] = None) -> bool:
-        """Persist a non-completion transition; completed uses complete_verified()."""
+        """持久化非完成状态转换；完成状态使用 complete_verified()。"""
         if status == "completed":
             raise ValueError("completed 只能由 complete_verified() 在 Contract 门禁后写入")
         values: dict[str, Any] = {"status": status, "updated_at": utc_now_iso(), "error_code": error_code, "error_message": error_message}
@@ -237,15 +254,14 @@ class RunRepository:
                 "queued", "context_building", "planning", "executing",
                 "reporting", "verifying", "retrying", "replanning",
             }:
-                # A stage may finish after the pause request was accepted. Keep
-                # the externally visible control state while still advancing
-                # current_stage to the safe continuation point.
+            # 某个阶段可能在暂停请求被接受后才完成。
+            # 保留对外可见的控制状态，同时将 current_stage 推进到安全的继续执行位置。
                 values["status"] = "pausing"
             result = await session.execute(update(RunModel).where(RunModel.run_id == run_id).values(**values))
             return result.rowcount == 1
 
     async def update_usage(self, run_id: str, usage: dict[str, Any]) -> bool:
-        """Refresh in-flight usage without changing status or clearing errors."""
+        """刷新进行中的用量，不改变状态，也不清除错误。"""
         async with self.database.transaction() as session:
             result = await session.execute(
                 update(RunModel)
@@ -255,7 +271,7 @@ class RunRepository:
             return result.rowcount == 1
 
     async def complete_verified(self, run_id: str, *, assistant_content: str, usage: dict[str, Any]) -> tuple[MessageModel, bool]:
-        """Atomically enforce required checks, complete Run, and append one assistant message."""
+        """原子地执行必需检查、完成 Run，并追加一条 Assistant 消息。"""
         async with self.database.transaction() as session:
             run = await session.get(RunModel, run_id)
             if run is None:
@@ -263,7 +279,13 @@ class RunRepository:
             checks = list((await session.execute(select(ContractCheckModel).where(ContractCheckModel.run_id == run_id, ContractCheckModel.required == 1))).scalars())
             if not checks or any(check.passed != 1 for check in checks):
                 raise ValueError("required Completion Contract 未全部通过")
-            existing = (await session.execute(select(MessageModel).where(MessageModel.run_id == run_id, MessageModel.role == "assistant"))).scalar_one_or_none()
+            existing_messages = list((await session.execute(
+                select(MessageModel).where(MessageModel.run_id == run_id, MessageModel.role == "assistant")
+            )).scalars())
+            existing = next(
+                (item for item in existing_messages if json.loads(item.metadata_json or "{}").get("verified") is True),
+                None,
+            )
             now = utc_now_iso()
             run.status = "completed"
             run.current_stage = "completed"
@@ -285,6 +307,18 @@ class RunRepository:
         async with self.database.transaction() as session:
             result = await session.execute(update(RunModel).where(RunModel.run_id == run_id).values(model_snapshot_json=json_text(snapshot), updated_at=utc_now_iso()))
             return result.rowcount == 1
+
+    async def update_config_snapshot(self, run_id: str, values: dict[str, Any]) -> bool:
+        """合并可恢复配置，供澄清问题/答案等控制状态持久化。"""
+        async with self.database.transaction() as session:
+            run = await session.get(RunModel, run_id)
+            if run is None:
+                return False
+            snapshot = json.loads(run.config_snapshot_json or "{}")
+            snapshot.update(values)
+            run.config_snapshot_json = json_text(snapshot)
+            run.updated_at = utc_now_iso()
+            return True
 
     async def list_recoverable(self) -> list[RunModel]:
         async with self.database.sessions() as session:
@@ -322,7 +356,7 @@ class RunRepository:
             return result.rowcount == 1
 
     async def request_pause(self, run_id: str) -> bool:
-        """Request a cooperative pause at the next durable stage boundary."""
+        """请求在下一个可持久化阶段边界执行协作式暂停。"""
         async with self.database.transaction() as session:
             run = await session.get(RunModel, run_id)
             allowed = tuple(status for status in self.ACTIVE_STATUSES if status not in {"pausing", "cancelling"})
@@ -336,7 +370,7 @@ class RunRepository:
             return True
 
     async def finalize_pause(self, run_id: str) -> bool:
-        """Pause a Run which has no live Runtime task (normally still queued)."""
+        """暂停没有活动 Runtime 任务的 Run（通常仍处于排队状态）。"""
         async with self.database.transaction() as session:
             run = await session.get(RunModel, run_id)
             if run is None or run.status != "pausing":
@@ -365,7 +399,7 @@ class RunRepository:
             return True
 
     async def latest_paused_for_session(self, session_id: str) -> Optional[RunModel]:
-        """Return the latest Run only when it is paused or waiting to pause."""
+        """仅当最新 Run 已暂停或正在等待暂停时返回它。"""
         async with self.database.sessions() as session:
             latest = (await session.execute(
                 select(RunModel)
@@ -378,7 +412,13 @@ class RunRepository:
             pause_requested = bool(json.loads(latest.config_snapshot_json or "{}").get("pause_requested"))
             return latest if latest.status in {"paused", "pausing"} or pause_requested else None
 
-    async def resume(self, run_id: str, *, clarification: Optional[str] = None) -> bool:
+    async def resume(
+        self,
+        run_id: str,
+        *,
+        clarification: Optional[str] = None,
+        clarifications: Optional[list[dict[str, Any]]] = None,
+    ) -> bool:
         async with self.database.transaction() as session:
             run = await session.get(RunModel, run_id)
             if run is None:
@@ -387,21 +427,72 @@ class RunRepository:
             pending_pause = bool(snapshot.get("pause_requested"))
             if run.status not in {"interrupted", "needs_user_input", "paused", "pausing"} and not pending_pause:
                 return False
+            if (clarification or clarifications) and run.status != "needs_user_input":
+                return False
             snapshot["pause_requested"] = False
-            if clarification:
-                entries = list(snapshot.get("clarifications", []))
-                entries.append({"content": clarification, "created_at": utc_now_iso()})
+            answer_items = list(clarifications or [])
+            if clarification and not answer_items:
+                answer_items = [{"answer": clarification}]
+            if answer_items:
+                entries = [dict(item) for item in snapshot.get("clarifications", []) if isinstance(item, dict)]
+                now = utc_now_iso()
+                for index, raw in enumerate(answer_items):
+                    answer = str(raw.get("answer") or raw.get("content") or "").strip()
+                    if not answer:
+                        continue
+                    requested_id = str(raw.get("clarification_id") or "").strip()
+                    requested_question = str(raw.get("question") or "").strip()
+                    target = next(
+                        (
+                            item for item in entries
+                            if (requested_id and str(item.get("clarification_id")) == requested_id)
+                            or (requested_question and str(item.get("question")) == requested_question)
+                            or (not requested_id and not requested_question and not str(item.get("answer") or "").strip())
+                        ),
+                        None,
+                    )
+                    if target is None:
+                        target = {
+                            "clarification_id": requested_id or f"clarification_legacy_{index + 1}",
+                            "question": requested_question or "用户补充说明",
+                            "ambiguity_type": str(raw.get("ambiguity_type") or "research_scope"),
+                            "asked_at": now,
+                            "blocking": bool(raw.get("blocking", True)),
+                        }
+                        entries.append(target)
+                    target["answer"] = answer
+                    target["answered_at"] = now
+                    clarification_id = str(target.get("clarification_id") or f"clarification_legacy_{index + 1}")
+                    target["clarification_id"] = clarification_id
+                    client_message_id = f"clarification-response:{run_id}:{clarification_id}"[:128]
+                    existing_message = (await session.execute(
+                        select(MessageModel).where(
+                            MessageModel.session_id == run.session_id,
+                            MessageModel.client_message_id == client_message_id,
+                        )
+                    )).scalar_one_or_none()
+                    if existing_message is None:
+                        session.add(MessageModel(
+                            message_id=new_id("msg"), session_id=run.session_id, run_id=run_id,
+                            client_message_id=client_message_id, role="user", content=answer,
+                            metadata_json=json_text({
+                                "type": "clarification_response",
+                                "clarification_id": clarification_id,
+                                "run_id": run_id,
+                            }), created_at=now,
+                        ))
                 snapshot["clarifications"] = entries
-            # Interrupted Runs keep their marker until Harness loads the latest
-            # checkpoint and selects the safe continuation stage. Clarification
-            # resumes intentionally rebuild context from queued.
+                snapshot["pending_clarifications"] = [
+                    item for item in entries if not str(item.get("answer") or "").strip()
+                ]
+            # 被中断的 Run 要一直保留标记，直到 Harness 加载最新检查点并选择安全的继续阶段。
+            # Clarification 恢复时会有意从 queued 状态重新构建上下文。
             if run.status == "needs_user_input":
                 run.status = "queued"
                 run.current_stage = "queued"
             elif run.status == "pausing":
-                # The stage operation is still alive. Cancelling the pending
-                # pause lets that same task continue without scheduling a
-                # second Runtime or waiting for a checkpoint boundary.
+                # 阶段操作仍然存活。取消待处理的暂停请求后，原任务可以继续执行，
+                # 无需重新调度第二个 Runtime，也无需等待检查点边界。
                 run.status = run.current_stage or "queued"
             run.cancellation_requested = 0
             run.error_code = None

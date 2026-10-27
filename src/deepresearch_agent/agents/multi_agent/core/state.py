@@ -26,9 +26,12 @@ class PlanContext(BaseModel):
     refined_query: Optional[str] = Field(default=None, description="经过澄清和重写后的查询")
 
     # 澄清历史记录（问题-回答对）
-    clarification_history: List[Dict[str, Optional[str]]] = Field(
+    clarification_history: List[Dict[str, Any]] = Field(
         default_factory=list,
-        description="澄清问答历史，格式: [{'question': '...', 'answer': '...'}]"
+        description=(
+            "澄清问答历史。每条记录可包含 clarification_id、question、"
+            "ambiguity_type、answer、asked_at、answered_at 和 blocking。"
+        )
     )
 
     # 用户偏好和约束
@@ -41,6 +44,16 @@ class PlanContext(BaseModel):
     domain_context: Optional[str] = Field(
         default=None,
         description="领域背景信息"
+    )
+
+    # Planner 前的语义压缩包；与原始输入分开保存，便于恢复和审计
+    planning_context_pack: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="PlanningContextPack 的结构化内容与来源追踪",
+    )
+    active_constraints: List[Dict[str, Any]] = Field(
+        default_factory=list,
+        description="当前有效的临时约束，不由摘要文本隐式替代",
     )
 
     # 创建时间

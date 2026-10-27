@@ -152,7 +152,11 @@ class BasePlanner:
         _LOGGER.info("Clarification result: %s", clarification.model_dump())
         self._record_clarification(context, clarification)
 
-        if not clarification.is_satisfied(context) and not self.config.allow_unclarified_plan:
+        unresolved = not clarification.is_satisfied(context)
+        # blocking 是 Clarifier 对高价值歧义的明确判断。即使旧配置允许
+        # “未澄清也生成计划”，阻塞性问题仍必须先交给用户确认；非阻塞性
+        # 问题才继续沿用旧配置的兼容行为。
+        if unresolved and (clarification.has_blocking_unresolved(context) or not self.config.allow_unclarified_plan):
             _LOGGER.info("澄清问题尚未全部回答，暂停计划生成")
             return PlannerResult(
                 plan_spec=None,
@@ -166,6 +170,7 @@ class BasePlanner:
         task_decomposition = self._task_decomposer.decompose(
             refined_query,
             source_mode=state.source_mode,
+            context_pack=self._planning_pack_text(context),
         )
 
         # Step 3: 计划审校
@@ -177,6 +182,7 @@ class BasePlanner:
             background_info=context.domain_context,
             user_intent=context.user_preferences.get("intent"),
             source_mode=state.source_mode,
+            context_pack=self._planning_pack_text(context),
         )
 
         plan_spec = review_outcome.plan_spec
@@ -200,7 +206,7 @@ class BasePlanner:
 
     @staticmethod
     def _simple_plan(state: PlanExecuteState, context: PlanContext, assumptions: List[str]) -> Optional[PlanSpec]:
-        """Use one bounded retrieval task for short, explicit summary/list questions."""
+        """对简短且明确的总结/列表问题使用一个有界检索任务。"""
         query = (context.refined_query or context.original_query or "").strip()
         markers = ("概括", "总结", "要点", "列出", "是什么", "简述", "summarize", "list ", "what is")
         if len(query) > 160 or not any(marker in query.lower() for marker in markers):
@@ -224,7 +230,7 @@ class BasePlanner:
 
     @staticmethod
     def _enforce_source_mode(plan_spec: PlanSpec, source_mode: str) -> None:
-        """Normalize LLM output and reject source leakage before execution."""
+        """在执行前规范化 LLM 输出，并拒绝信息源泄漏。"""
         if source_mode != "web":
             raise ValueError(f"不支持的信息源: {source_mode}")
         for node in plan_spec.task_graph.nodes:
@@ -277,10 +283,34 @@ class BasePlanner:
         context = state.plan_context
         if not context.original_query:
             context.original_query = state.input
-        if not context.refined_query:
+        pack = context.planning_context_pack or state.context_snapshot.get("planning_context_pack", {})
+        if isinstance(pack, dict) and pack:
+            context.planning_context_pack = pack
+            context.active_constraints = list(pack.get("active_constraints") or context.active_constraints)
+            context.domain_context = context.domain_context or str(pack.get("content") or "")
+            context.user_preferences.setdefault("intent", pack.get("intent"))
+        # 将已经回答的澄清作为稳定的研究约束回灌给后续任务分解和审校。
+        # 不覆盖外部已经写入的非默认 refined_query，避免破坏旧 checkpoint。
+        base_query = context.refined_query or context.original_query
+        answers = [
+            str(entry.get("answer")).strip()
+            for entry in context.clarification_history
+            if str(entry.get("answer") or "").strip()
+        ]
+        if answers:
+            context.refined_query = base_query.split("\n\n用户补充澄清：", 1)[0] + "\n\n用户补充澄清：" + "；".join(answers)
+        elif not context.refined_query:
             # 若尚未有澄清后的查询，则默认等同于原始查询
             context.refined_query = context.original_query
         return context
+
+    @staticmethod
+    def _planning_pack_text(context: PlanContext) -> Optional[str]:
+        pack = context.planning_context_pack or {}
+        if not isinstance(pack, dict):
+            return None
+        value = pack.get("content")
+        return value if isinstance(value, str) and value.strip() else None
 
     def _record_clarification(self, context: PlanContext, clarification: ClarificationResult) -> None:
         """
@@ -288,16 +318,36 @@ class BasePlanner:
         """
         if not clarification.questions:
             return
-        existing = {entry.get("question") for entry in context.clarification_history}
+        existing = {
+            str(entry.get("question")): entry
+            for entry in context.clarification_history
+            if entry.get("question")
+        }
         timestamp = datetime.now().isoformat()
-        for question in clarification.questions:
-            if question in existing:
+        for index, question in enumerate(clarification.questions[:2]):
+            previous = existing.get(str(question))
+            if previous is not None:
+                # 重新分析时保留原 clarification_id、回答和时间戳，
+                # 这样 UI 提交的 ID 在恢复后仍然能匹配同一条问题。
                 continue
+            detail = clarification.question_details[index] if index < len(clarification.question_details) else {}
+            ambiguity_type = (
+                detail.get("ambiguity_type")
+                or (
+                    clarification.ambiguity_types[index]
+                    if index < len(clarification.ambiguity_types)
+                    else "research_scope"
+                )
+            )
             context.clarification_history.append(
                 {
+                    "clarification_id": str(detail.get("clarification_id") or detail.get("id") or f"clarification_{uuid.uuid4().hex[:12]}"),
                     "question": question,
+                    "ambiguity_type": ambiguity_type,
                     "answer": None,
                     "asked_at": timestamp,
+                    "answered_at": None,
+                    "blocking": bool(detail.get("blocking", clarification.blocking)),
                 }
             )
         if clarification.ambiguity_types:

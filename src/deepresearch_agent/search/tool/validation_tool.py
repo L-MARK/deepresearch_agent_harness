@@ -22,6 +22,7 @@ class AnswerValidationTool:
         answer: str,
         *,
         reference_keywords: Optional[Dict[str, List[str]]] = None,
+        context_pack: Optional[Dict[str, Any] | str] = None,
     ) -> Dict[str, Any]:
         if not query:
             raise ValueError("query不能为空")
@@ -32,7 +33,7 @@ class AnswerValidationTool:
             answer,
             reference_keywords=reference_keywords,
         )
-        return {"query": query, "answer": answer, "validation": result}
+        return {"query": query, "answer": answer, "validation": result, "context_pack": context_pack}
 
     def get_tool(self) -> BaseTool:
         validator = self

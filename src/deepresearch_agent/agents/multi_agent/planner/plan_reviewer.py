@@ -67,6 +67,7 @@ class PlanReviewer:
         background_info: Optional[str] = None,
         user_intent: Optional[str] = None,
         source_mode: str = "web",
+        context_pack: Optional[str] = None,
     ) -> PlanReviewOutcome:
         """
         对任务图执行审校并输出PlanSpec
@@ -80,17 +81,31 @@ class PlanReviewer:
             task_graph=task_graph_json,
             assumptions=assumptions_text,
         )
+        if background_info:
+            prompt += "\n\n【领域与历史上下文】\n" + background_info
+        if context_pack:
+            prompt += "\n\n【PlanningContextPack（只读、需保留来源约束）】\n" + context_pack
         _LOGGER.debug("PlanReviewer prompt: %s", prompt)
         response = self._invoke_llm(prompt)
         parsed = self._parse_response(response)
 
-        problem_statement = parsed.get("problem_statement") or {}
+        raw_problem_statement = parsed.get("problem_statement")
+        if isinstance(raw_problem_statement, dict):
+            problem_statement = dict(raw_problem_statement)
+        elif isinstance(raw_problem_statement, str) and raw_problem_statement.strip():
+            # 某些模型会把问题陈述压缩成一句话，而不是返回文档规定的对象结构。
+            problem_statement = {"background_info": raw_problem_statement.strip()}
+        else:
+            problem_statement = {}
+        problem_statement.setdefault("original_query", original_query)
         # 如果LLM未填充背景信息，则尝试回写外部上下文
         problem_statement.setdefault("background_info", background_info)
         problem_statement.setdefault("user_intent", user_intent)
 
-        acceptance_data = parsed.get("acceptance_criteria") or {}
-        validation_data = parsed.get("validation_results") or {}
+        raw_acceptance_data = parsed.get("acceptance_criteria")
+        acceptance_data = dict(raw_acceptance_data) if isinstance(raw_acceptance_data, dict) else {}
+        raw_validation_data = parsed.get("validation_results")
+        validation_data = dict(raw_validation_data) if isinstance(raw_validation_data, dict) else {}
 
         reviewed_task_graph = self._resolve_task_graph(parsed.get("task_graph"), task_graph)
         for node in reviewed_task_graph.nodes:

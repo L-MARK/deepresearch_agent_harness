@@ -1,4 +1,4 @@
-"""Bounded curated memory inspired by Hermes Agent's frozen stores."""
+"""受 Hermes Agent 冻结存储启发的有界精选 Memory。"""
 
 from __future__ import annotations
 
@@ -25,22 +25,24 @@ class MemoryLimits:
 
 
 class CuratedMemoryService:
-    """The one persistent Memory system; user/project are targets, not layers."""
+    """唯一的持久化 Memory 系统；用户/项目是作用目标，不是分层结构。"""
 
     VALID_STATUSES = {"candidate", "active", "rejected", "archived"}
-    VALID_TARGETS = {"user", "project"}
+    VALID_TARGETS = {"user", "project", "session"}
 
     def __init__(
         self, repository: MemoryRepository, audit: AuditRepository, *,
         policy: MemoryPolicy | None = None, user_max_tokens: int = 500,
         project_max_tokens: int = 800, user_max_chars: int = 1375,
         project_max_chars: int = 2200,
+        session_max_tokens: int = 600, session_max_chars: int = 1800,
     ):
         self.repository, self.audit = repository, audit
         self.policy = policy or MemoryPolicy()
         self.limits = {
             "user": MemoryLimits(max(1, user_max_tokens), max(1, user_max_chars)),
             "project": MemoryLimits(max(1, project_max_tokens), max(1, project_max_chars)),
+            "session": MemoryLimits(max(1, session_max_tokens), max(1, session_max_chars)),
         }
 
     @staticmethod
@@ -50,16 +52,16 @@ class CuratedMemoryService:
     def _validate_target(self, target: str) -> str:
         normalized = target.strip().lower()
         if normalized not in self.VALID_TARGETS:
-            raise MemoryRejected("Curated Memory 只允许 user 或 project target")
+            raise MemoryRejected("Curated Memory target 必须为 user、project 或 session")
         return normalized
 
-    async def capacity(self, target: str, *, excluding_id: str | None = None) -> dict[str, int | float | str]:
+    async def capacity(self, target: str, *, excluding_id: str | None = None, session_id: str | None = None) -> dict[str, int | float | str]:
         target = self._validate_target(target)
-        items = await self.repository.list_curated(statuses=("active",), target=target, now=utc_now_iso())
+        items = await self.repository.list_curated(statuses=("active",), target=target, now=utc_now_iso(), session_id=session_id)
         contents = [item.content for item in items if item.memory_id != excluding_id]
         rendered = ""
         if contents:
-            heading = "# USER" if target == "user" else "# PROJECT MEMORY"
+            heading = {"user": "# USER", "project": "# PROJECT MEMORY", "session": "# SESSION SHORT-TERM MEMORY"}[target]
             rendered = heading + "\n" + "\n".join(f"- {value}" for value in contents)
         chars = len(rendered)
         tokens = count_tokens(rendered)
@@ -72,13 +74,13 @@ class CuratedMemoryService:
         }
 
     async def capacities(self) -> dict[str, dict[str, int | float | str]]:
-        return {target: await self.capacity(target) for target in ("user", "project")}
+        return {target: await self.capacity(target) for target in ("user", "project", "session")}
 
-    async def _assert_capacity(self, target: str, content: str, *, excluding_id: str | None = None) -> None:
-        usage = await self.capacity(target, excluding_id=excluding_id)
-        existing = await self.repository.list_curated(statuses=("active",), target=target, now=utc_now_iso())
+    async def _assert_capacity(self, target: str, content: str, *, excluding_id: str | None = None, session_id: str | None = None) -> None:
+        usage = await self.capacity(target, excluding_id=excluding_id, session_id=session_id)
+        existing = await self.repository.list_curated(statuses=("active",), target=target, now=utc_now_iso(), session_id=session_id)
         contents = [item.content for item in existing if item.memory_id != excluding_id] + [content]
-        heading = "# USER" if target == "user" else "# PROJECT MEMORY"
+        heading = {"user": "# USER", "project": "# PROJECT MEMORY", "session": "# SESSION SHORT-TERM MEMORY"}[target]
         rendered = heading + "\n" + "\n".join(f"- {value}" for value in contents)
         next_chars, next_tokens = len(rendered), count_tokens(rendered)
         if next_chars > int(usage["max_chars"]) or next_tokens > int(usage["max_tokens"]):
@@ -101,10 +103,14 @@ class CuratedMemoryService:
             await self.audit.append(action="memory.rejected_by_policy", entity_type="memory", entity_id="pending", payload={"reason": verdict.reason})
             raise MemoryRejected(verdict.reason or "Memory policy rejected")
         refs = list(provenance_refs or [])
+        if selected_target == "session" and not session_id:
+            raise MemoryRejected("session short-term memory 必须绑定 session_id")
         if selected_target == "project" and kind in {"fact", "decision"} and not refs:
             raise MemoryRejected("项目事实或决策必须包含 provenance")
 
-        existing_items = await self.repository.list_curated(statuses=("candidate", "active"), target=selected_target)
+        existing_items = await self.repository.list_curated(
+            statuses=("candidate", "active"), target=selected_target, session_id=session_id,
+        )
         for existing in existing_items:
             if existing.content.strip() == normalized:
                 return existing
@@ -119,10 +125,10 @@ class CuratedMemoryService:
                 break
 
         if activate:
-            await self._assert_capacity(selected_target, normalized, excluding_id=supersedes)
+            await self._assert_capacity(selected_target, normalized, excluding_id=supersedes, session_id=session_id)
         item = await self.repository.create_candidate(
             content=normalized, scope=selected_target, kind=kind, provenance_refs=refs,
-            confidence=max(0.0, min(1.0, confidence)), session_id=None,
+            confidence=max(0.0, min(1.0, confidence)), session_id=session_id,
             created_by=created_by, supersedes=supersedes, expires_at=expires_at,
         )
         if activate:
@@ -166,7 +172,7 @@ class CuratedMemoryService:
             if not verdict.allowed:
                 raise MemoryRejected(verdict.reason or "Memory policy rejected")
             excluding_id = memory_id if item.status == "active" else (item.supersedes or memory_id)
-            await self._assert_capacity(target, next_content, excluding_id=excluding_id)
+            await self._assert_capacity(target, next_content, excluding_id=excluding_id, session_id=item.session_id)
         if values:
             await self.repository.update_lifecycle(memory_id, **values)
             if values.get("status") == "active" and item.supersedes:
@@ -211,6 +217,20 @@ class CuratedMemoryService:
             "version": await self.repository.snapshot_version(), "items": groups,
             "rendered": rendered, "tokens": count_tokens(rendered), "chars": len(rendered),
         }
+
+    async def build_session_snapshot(self, session_id: str) -> dict[str, Any]:
+        """Read dynamic short-term memory; user/project prefix remains frozen."""
+        items = await self.repository.list_curated(
+            statuses=("active",), target="session", session_id=session_id, now=utc_now_iso(),
+        )
+        entries = [self.serialize(item) for item in items]
+        rendered = "# SESSION SHORT-TERM MEMORY\n" + "\n".join(
+            f"- {item['content']}" for item in entries
+        ) if entries else ""
+        limit = self.limits["session"]
+        if len(rendered) > limit.max_chars or count_tokens(rendered) > limit.max_tokens:
+            raise MemoryRejected("当前 Session 短期记忆超过容量上限")
+        return {"items": {"session": entries}, "rendered": rendered, "tokens": count_tokens(rendered), "chars": len(rendered)}
 
     @staticmethod
     def serialize(item) -> dict[str, Any]:

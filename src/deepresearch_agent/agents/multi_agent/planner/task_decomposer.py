@@ -47,7 +47,9 @@ class TaskDecomposer:
         self._llm = llm or get_llm_model()
         self._max_tasks = max_tasks
 
-    def decompose(self, query: str, *, source_mode: str = "web") -> TaskDecompositionResult:
+    def decompose(
+        self, query: str, *, source_mode: str = "web", context_pack: Optional[str] = None,
+    ) -> TaskDecompositionResult:
         """
         根据查询生成TaskGraph
 
@@ -68,6 +70,8 @@ class TaskDecomposer:
             "所有检索任务只能使用 web_search、deep_research 或 deeper_research；"
             "不得生成其他检索类型。"
         )
+        if context_pack:
+            prompt += "\n\n【查询感知上下文（只用于理解，不直接复制任务图）】\n" + context_pack
 
         _LOGGER.debug("TaskDecomposer prompt: %s", prompt)
         response = self._invoke_llm(prompt)

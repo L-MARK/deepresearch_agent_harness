@@ -1,5 +1,9 @@
-"""Persistent Harness domain contracts; runtime is imported from .runtime."""
+"""持久化 Harness 领域契约；运行时组件从 .runtime 延迟导入。"""
 
 from .contracts import RunStatus, SourceMode, WorkflowMode
+from .reflection import NoopOverallReflection, OverallReflectionHook
 
-__all__ = ["RunStatus", "SourceMode", "WorkflowMode"]
+__all__ = [
+    "RunStatus", "SourceMode", "WorkflowMode",
+    "NoopOverallReflection", "OverallReflectionHook",
+]

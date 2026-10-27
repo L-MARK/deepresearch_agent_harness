@@ -1,4 +1,4 @@
-"""Adapters that place both legacy research workflows behind one Harness loop."""
+"""将两个旧研究工作流统一接入一个 Harness 循环的适配器。"""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from typing import Any, Protocol
 from deepresearch_agent.agents.multi_agent.core.execution_record import ExecutionRecord
 from deepresearch_agent.agents.multi_agent.core.plan_spec import PlanSpec
 from deepresearch_agent.agents.multi_agent.core.retrieval_result import RetrievalResult
-from deepresearch_agent.agents.multi_agent.core.state import PlanExecuteState
+from deepresearch_agent.agents.multi_agent.core.state import PlanContext, PlanExecuteState
 from deepresearch_agent.agents.multi_agent.orchestrator import MultiAgentOrchestrator
 from deepresearch_agent.agents.multi_agent.planner.base_planner import PlannerResult
 from deepresearch_agent.agents.multi_agent.reporter.base_reporter import ReportResult, SectionContent
@@ -26,6 +26,7 @@ from deepresearch_agent.config.settings import (
     REPORT_SECTION_EVIDENCE_BUDGET,
     VERIFICATION_RESERVED_TOKENS,
 )
+from deepresearch_agent.context.compression import EvidenceContextCompressor
 from deepresearch_agent.evolution.skill_compiler import compile_runtime_policy, policy_prompt
 
 from .run_context import RunContext
@@ -35,6 +36,7 @@ from .report_safety import add_inline_citations, citation_evidence_ids, has_inte
 class WorkflowDriver(Protocol):
     async def plan(self, failures: list[str] | None = None) -> None: ...
     async def execute(self) -> None: ...
+    async def prepare_overall_reflection(self) -> dict[str, Any] | None: ...
     async def report(self) -> str: ...
     async def repair_report(self, failures: list[str]) -> bool: ...
     def snapshot(self) -> dict[str, Any]: ...
@@ -44,6 +46,8 @@ class WorkflowDriver(Protocol):
     def evidence_card_coverage(self) -> dict[str, Any] | None: ...
     def report_metrics(self) -> dict[str, Any]: ...
     def plan_record(self) -> tuple[dict[str, Any], list[dict[str, Any]]] | None: ...
+    def clarification_questions(self) -> list[dict[str, Any]]: ...
+    def clarification_history(self) -> list[dict[str, Any]]: ...
 
 
 def _evidence_only_report(
@@ -52,7 +56,7 @@ def _evidence_only_report(
     title: str = "修复后的研究报告",
     required_sections: list[str] | None = None,
 ) -> tuple[str, list[RetrievalResult]]:
-    """Build a conservative report that cannot introduce unsupported claims."""
+    """构建保守报告，不能引入没有证据支持的论断。"""
     selected: list[RetrievalResult] = []
     seen_ids: set[str] = set()
     for item in rank_evidence(results):
@@ -91,9 +95,9 @@ def _evidence_only_report(
 
 
 class PlanExecuteReportDriver:
-    """Thin staged wrapper around the existing Planner/Worker/Reporter components."""
+    """围绕现有 Planner/Worker/Reporter 组件的轻量分阶段封装。"""
 
-    def __init__(self, context: RunContext, orchestrator: MultiAgentOrchestrator, *, events=None):
+    def __init__(self, context: RunContext, orchestrator: MultiAgentOrchestrator, *, events=None, evidence_context_compressor: EvidenceContextCompressor | None = None):
         self.context = context
         self.orchestrator = orchestrator
         self.events = events
@@ -107,14 +111,26 @@ class PlanExecuteReportDriver:
             source_mode=context.source_mode.value, workflow_mode=context.workflow_mode.value,
             budget_state={"limits": context.budget_limits.model_dump(), "usage": context.budget_usage.model_dump()},
             context_snapshot=runtime_snapshot,
-            # Planning must reason about the user's request, not the serialized
-            # system/context envelope. The latter remains available separately.
-            input=(context.resolved_query or context.original_query) + policy_prompt(self.skill_policy),
+            # 明确传入原始查询，避免 PlanExecuteState 从包含 Skill Policy
+            # 的 input 字段自动初始化出被污染的 PlanContext。
+            plan_context=PlanContext(
+                original_query=context.original_query,
+                refined_query=context.refined_query or context.resolved_query,
+                planning_context_pack=(context.context_snapshot or {}).get("planning_context_pack") or {},
+                active_constraints=(context.context_snapshot or {}).get("planning_context_pack", {}).get("active_constraints", []),
+            ),
+            # 规划必须围绕用户请求进行推理，而不是围绕序列化的系统/上下文封装。
+            # 后者会单独保留供需要的阶段使用。
+            input=(context.refined_query or context.resolved_query or context.original_query)
+            + "\n\n"
+            + str((context.context_snapshot or {}).get("planning_context_pack", {}).get("content") or "")
+            + policy_prompt(self.skill_policy),
         )
         self.planner_result: PlannerResult | None = None
         self.report_result: ReportResult | None = None
         self._repair_pending = False
         self._restore(context.workflow_state)
+        self._hydrate_clarifications(context.config_snapshot.get("clarifications", []))
 
     def _restore(self, payload: dict[str, Any]) -> None:
         if not payload:
@@ -133,6 +149,64 @@ class PlanExecuteReportDriver:
         if payload.get("report_result"):
             self.report_result = ReportResult.model_validate(payload["report_result"])
         self._repair_pending = bool(payload.get("repair_pending"))
+
+    def _hydrate_clarifications(self, persisted: Any) -> None:
+        """把 Run 配置中的澄清记录合并回可检查点化的 PlanContext。"""
+        if self.state.plan_context is None or not isinstance(persisted, list):
+            return
+        history = self.state.plan_context.clarification_history
+        by_id = {
+            str(item.get("clarification_id")): item
+            for item in history
+            if item.get("clarification_id")
+        }
+        by_question = {
+            str(item.get("question")): item
+            for item in history
+            if item.get("question")
+        }
+        for raw in persisted:
+            if not isinstance(raw, dict):
+                continue
+            # 兼容旧版仅保存 content 的记录，把它作为通用补充说明。
+            question = str(raw.get("question") or "用户补充说明")
+            answer = raw.get("answer") or raw.get("content")
+            item = by_id.get(str(raw.get("clarification_id"))) or by_question.get(question)
+            if item is None:
+                item = {
+                    "clarification_id": str(raw.get("clarification_id") or f"clarification_{len(history) + 1}"),
+                    "question": question,
+                    "ambiguity_type": raw.get("ambiguity_type") or "research_scope",
+                    "answer": answer,
+                    "asked_at": raw.get("asked_at"),
+                    "answered_at": raw.get("answered_at"),
+                    "blocking": bool(raw.get("blocking", True)),
+                }
+                history.append(item)
+                by_id[str(item["clarification_id"])] = item
+                by_question[question] = item
+            elif str(answer or "").strip() and not str(item.get("answer") or "").strip():
+                item["answer"] = answer
+                item["answered_at"] = raw.get("answered_at") or item.get("answered_at")
+
+    def clarification_history(self) -> list[dict[str, Any]]:
+        if self.state.plan_context is None:
+            return []
+        return [dict(item) for item in self.state.plan_context.clarification_history]
+
+    def clarification_questions(self) -> list[dict[str, Any]]:
+        if self.planner_result is not None and self.state.plan_context is not None:
+            return self.planner_result.clarification.pending_questions(self.state.plan_context)
+        return [
+            {
+                "clarification_id": str(item.get("clarification_id") or "pending_clarification"),
+                "question": str(item.get("question") or ""),
+                "ambiguity_type": str(item.get("ambiguity_type") or "research_scope"),
+                "blocking": bool(item.get("blocking", True)),
+            }
+            for item in self.clarification_history()
+            if str(item.get("question") or "").strip() and not str(item.get("answer") or "").strip()
+        ][:2]
 
     async def plan(self, failures: list[str] | None = None) -> None:
         self.planner_result = await asyncio.to_thread(
@@ -173,6 +247,30 @@ class PlanExecuteReportDriver:
         )
         existing = {item.record_id for item in self.state.execution_records}
         self.state.execution_records.extend(item for item in records if item.record_id not in existing)
+
+    async def prepare_overall_reflection(self) -> dict[str, Any] | None:
+        """Prepare the future post-Orchestrator reflection input only."""
+        if not self.evidence_context_compressor.enabled:
+            return None
+        execution_context = self.state.execution_context
+        retrieval_results: list[Any] = []
+        if execution_context is not None:
+            for value in execution_context.retrieval_cache.values():
+                if isinstance(value, list):
+                    retrieval_results.extend(value)
+                elif value is not None:
+                    retrieval_results.append(value)
+        pack = self.evidence_context_compressor.compress(
+            research_objective=self.state.plan_context.refined_query or self.state.plan_context.original_query,
+            plan=self.state.plan,
+            task_records=self.state.execution_records,
+            retrieval_results=retrieval_results,
+            evidence_ledger=(execution_context.evidence_registry.values() if execution_context else []),
+            current_constraints=self.state.plan_context.active_constraints,
+        ).to_dict()
+        self.state.context_snapshot["evidence_context_pack"] = pack
+        self.state.context_snapshot["overall_reflection_status"] = "prepared"
+        return pack
 
     async def _publish_execution_progress(self, kind, task, record) -> None:
         task_payload = {
@@ -250,7 +348,7 @@ class PlanExecuteReportDriver:
         return remaining < REPORT_RESERVED_TOKENS + VERIFICATION_RESERVED_TOKENS
 
     def _build_reserved_budget_report(self) -> ReportResult:
-        """Finish without another model call while keeping the report readable."""
+        """不再调用模型，直接生成可读的收尾报告。"""
         evidence_by_id: dict[str, RetrievalResult] = {}
         for _, _, _, result in self.evidence_results():
             evidence_by_id[result.result_id] = result
@@ -324,7 +422,7 @@ class PlanExecuteReportDriver:
         report_parts = [f"# {outline.title}", outline.abstract or ""]
         for section, content in zip(outline.sections, section_contents):
             report_parts.extend([f"## {section.title}", content.content])
-        # Full coverage lives in structured metadata and the Evidence Ledger.
+        # 完整覆盖信息保存在结构化元数据和 Evidence Ledger 中。
         _, annex_ids = pipeline.annex(cards)
         final_report = "\n\n".join(part for part in report_parts if part).strip()
         coverage = pipeline.coverage(cards, routing, processed_ids, annex_ids)
@@ -353,7 +451,7 @@ class PlanExecuteReportDriver:
 
     @staticmethod
     def _clean_fallback_claim(value: str, *, limit: int = 360) -> str:
-        """Remove common webpage chrome and Markdown that corrupt report layout."""
+        """移除常见网页外壳和会破坏报告布局的 Markdown 内容。"""
         text = re.sub(r"[`#>*_|]+", " ", str(value or ""))
         text = re.sub(
             r"(?i)skip to content|navigation menu|sign in|cookie settings|loading(?:\s+loading)+|"
@@ -370,7 +468,7 @@ class PlanExecuteReportDriver:
         plan = self.planner_result.plan_spec if self.planner_result else None
         if plan is None or len(plan.task_graph.nodes) != 1:
             return False
-        query = (self.context.resolved_query or self.context.original_query).lower()
+        query = (self.context.refined_query or self.context.resolved_query or self.context.original_query).lower()
         markers = ("概括", "总结", "要点", "列出", "是什么", "简述", "summarize", "list ", "what is")
         return len(query) <= 160 and any(marker in query for marker in markers)
 
@@ -382,7 +480,7 @@ class PlanExecuteReportDriver:
             if item.result_id not in seen:
                 seen.add(item.result_id)
                 unique.append(item)
-        query = (self.context.resolved_query or self.context.original_query).lower()
+        query = (self.context.refined_query or self.context.resolved_query or self.context.original_query).lower()
         candidates = unique
         if "药物" in query or "用药" in query:
             drug_terms = ("药物", "用药", "阿司匹林", "抗血小板", "抗凝", "溶栓", "尼莫地平")
@@ -533,11 +631,13 @@ class PlanExecuteReportDriver:
 
 
 class DeepResearchDriver:
-    """Keeps the existing DeepResearch loop as execute, with deterministic plan/report stages."""
+    """保留现有 DeepResearch 循环作为执行阶段，并增加确定性的规划/报告阶段。"""
 
-    def __init__(self, context: RunContext, agent: Any, events: Any = None):
+    def __init__(self, context: RunContext, agent: Any, events: Any = None, evidence_context_compressor: EvidenceContextCompressor | None = None):
         self.context, self.agent = context, agent
         self.events = events
+        self.evidence_context_compressor = evidence_context_compressor or EvidenceContextCompressor()
+        self.evidence_context_pack: dict[str, Any] | None = None
         self._iterations: dict[int, dict[str, Any]] = {}
         self.thinking: str | None = None
         research_tool = getattr(agent, "research_tool", None)
@@ -555,19 +655,23 @@ class DeepResearchDriver:
 
     async def plan(self, failures: list[str] | None = None) -> None:
         if failures and set(failures) & {"min_evidence", "claim_support", "source_match"}:
-            # A verification-driven replan must actually execute research again;
-            # retaining the prior answer would turn replan into a no-op.
+            # 由验证失败触发的重新规划必须真正再次执行研究；
+            # 保留旧答案会使重新规划变成空操作。
             self.answer = None
             self.results = []
         self._plan = {
             "plan_id": f"plan_{self.context.run_id}", "version": self.context.plan_version + 1,
             "status": "executing", "source_mode": self.context.source_mode.value,
-            "tasks": [{"task_id": f"task_{self.context.run_id}_research", "task_type": "deep_research", "status": "pending", "source_mode": self.context.source_mode.value, "description": self.context.original_query, "parameters": {"query": self.context.resolved_query or self.context.original_query}}],
+            "tasks": [{"task_id": f"task_{self.context.run_id}_research", "task_type": "deep_research", "status": "pending", "source_mode": self.context.source_mode.value, "description": self.context.refined_query or self.context.original_query, "parameters": {"query": self.context.refined_query or self.context.resolved_query or self.context.original_query}}],
             "verification_failures": failures or [],
         }
 
     async def execute(self) -> None:
         if self.answer is None:
+            # model_input 是序列化后的 LLM 上下文（包含系统契约、记忆和其他提示词块），
+            # 不是搜索查询。把它传给 Web Provider 会导致 Provider 搜索整个运行时封装，
+            # 而不是搜索用户真正提出的研究问题。
+            research_query = self.context.refined_query or self.context.resolved_query or self.context.original_query
             tool = getattr(self.agent, "research_tool", None)
             if tool is not None and hasattr(tool, "thinking_stream"):
                 # 直接流式消费 research_tool.thinking_stream（与 LangGraph 研究节点同源），
@@ -581,7 +685,7 @@ class DeepResearchDriver:
                     target.progress_callback = _on_progress
                 try:
                     async for chunk in tool.thinking_stream(
-                        self.context.model_input or self.context.resolved_query or self.context.original_query
+                        research_query
                     ):
                         if isinstance(chunk, dict):
                             if chunk.get("answer"):
@@ -594,7 +698,7 @@ class DeepResearchDriver:
                 # 无流式接口（测试桩等）：回退到闭路 ask 路径
                 self.answer = await asyncio.to_thread(
                     self.agent.ask,
-                    self.context.model_input or self.context.resolved_query or self.context.original_query,
+                    research_query,
                     self.context.session_id,
                     bypass_cache=self.context.source_mode.value == "web",
                 )
@@ -604,6 +708,13 @@ class DeepResearchDriver:
             provider_results = list(getattr(tool.deep_research, "provider_results", []) or [])
         if provider_results:
             self.results = provider_results
+        if self.evidence_context_compressor.enabled:
+            self.evidence_context_pack = self.evidence_context_compressor.compress(
+                research_objective=self.context.refined_query or self.context.original_query,
+                task_records=self.execution_records(),
+                retrieval_results=self.results,
+                current_constraints=self.context.context_snapshot.get("planning_context_pack", {}).get("active_constraints", []),
+            ).to_dict()
 
     async def _on_tool_progress(self, msg: dict) -> None:
         """聚合工具迭代进度并发布 agent.progress / iteration.completed 事件"""
@@ -657,6 +768,20 @@ class DeepResearchDriver:
         self._report = f"# 深度研究报告\n\n{body}{limitation}".strip()
         return self._report
 
+    async def prepare_overall_reflection(self) -> dict[str, Any] | None:
+        """Prepare evidence for a future independent post-Orchestrator stage."""
+        if not self.evidence_context_compressor.enabled:
+            return None
+        if self.evidence_context_pack is None:
+            self.evidence_context_pack = self.evidence_context_compressor.compress(
+                research_objective=self.context.refined_query or self.context.original_query,
+                task_records=self.execution_records(), retrieval_results=self.results,
+                current_constraints=self.context.context_snapshot.get("planning_context_pack", {}).get("active_constraints", []),
+            ).to_dict()
+        self.context.context_snapshot["evidence_context_pack"] = self.evidence_context_pack
+        self.context.context_snapshot["overall_reflection_status"] = "prepared"
+        return self.evidence_context_pack
+
     async def repair_report(self, failures: list[str]) -> bool:
         if self._report is None:
             return False
@@ -676,7 +801,7 @@ class DeepResearchDriver:
         return True
 
     def snapshot(self) -> dict[str, Any]:
-        return {"answer": self.answer, "report": self._report, "plan": self._plan, "results": [item.to_dict() for item in self.results], "repair_pending": self._repair_pending}
+        return {"answer": self.answer, "report": self._report, "plan": self._plan, "results": [item.to_dict() for item in self.results], "repair_pending": self._repair_pending, "evidence_context_pack": self.evidence_context_pack}
 
     def execution_records(self) -> list[ExecutionRecord]:
         task_id = f"task_{self.context.run_id}_research"

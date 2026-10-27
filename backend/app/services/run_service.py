@@ -22,8 +22,13 @@ from deepresearch_agent.persistence.repositories import (
     EvidenceRepository, MessageRepository, PlanTaskToolRepository, RunRepository,
     SessionRepository, MemoryRepository, AuditRepository,
     LearningReviewRepository, SkillRepository,
+    TopicSummaryRepository,
 )
-from deepresearch_agent.context import ArtifactEditContextBuilder, ContextBuilder, ContextCompactor
+from deepresearch_agent.context import (
+    ArtifactEditContextBuilder, ContextBuilder, ContextCompactor,
+    ContextWindowGuard, EvidenceContextCompressor, PlanningContextCompressor,
+    RunTopicSummaryService,
+)
 from deepresearch_agent.memory import MemoryExtractor, MemoryService
 from deepresearch_agent.sessions import SessionSearchService
 from deepresearch_agent.config import settings
@@ -41,6 +46,7 @@ class RunService:
         database: Database,
         *,
         workflow_factory: Callable[[Any], Any] | None = None,
+        overall_reflection_hook: Any | None = None,
         artifact_root=ARTIFACT_ROOT,
         skills_root=settings.SKILLS_ROOT,
     ):
@@ -51,6 +57,7 @@ class RunService:
         self.event_bus = EventBus(self.events)
         self.artifact_store = ArtifactStore(artifact_root)
         self._external_factory = workflow_factory
+        self.overall_reflection_hook = overall_reflection_hook
         self._router = None if workflow_factory else create_default_router()
         self._tasks: dict[str, asyncio.Task] = {}
         memory_repository = MemoryRepository(database)
@@ -60,9 +67,40 @@ class RunService:
             project_max_tokens=settings.MEMORY_PROJECT_MAX_TOKENS,
             user_max_chars=settings.MEMORY_USER_MAX_CHARS,
             project_max_chars=settings.MEMORY_PROJECT_MAX_CHARS,
+            session_max_tokens=settings.MEMORY_SESSION_MAX_TOKENS,
+            session_max_chars=settings.MEMORY_SESSION_MAX_CHARS,
         )
         session_repository = SessionRepository(database)
         self.sessions = session_repository
+        self.topic_summaries = TopicSummaryRepository(database)
+        self.topic_summary_service = RunTopicSummaryService(self.topic_summaries)
+        planning_guard = ContextWindowGuard(
+            context_window=settings.CONTEXT_MAX_TOKENS + settings.CONTEXT_COMPRESSION_RESERVED_OUTPUT_TOKENS,
+            provider_input_limit=settings.CONTEXT_MAX_TOKENS,
+            reserved_output_tokens=settings.CONTEXT_COMPRESSION_RESERVED_OUTPUT_TOKENS,
+            safety_margin=settings.CONTEXT_COMPRESSION_SAFETY_MARGIN_TOKENS,
+            trigger_ratio=settings.CONTEXT_WINDOW_TRIGGER_RATIO,
+            target_ratio=settings.CONTEXT_WINDOW_TARGET_RATIO,
+            max_rounds=settings.CONTEXT_COMPRESSION_MAX_ROUNDS,
+            model=settings.CONTEXT_COMPRESSION_MODEL or None,
+        )
+        compression_llm = None
+        if settings.OPENAI_API_KEY and settings.CONTEXT_COMPRESSION_MODEL:
+            try:
+                compression_llm = get_llm_model(
+                    model=settings.CONTEXT_COMPRESSION_MODEL,
+                    temperature=0.0,
+                    max_tokens=settings.CONTEXT_COMPRESSION_MAX_OUTPUT_TOKENS,
+                )
+            except Exception:
+                # The deterministic compressor remains available when the
+                # optional semantic compression model is not configured.
+                compression_llm = None
+        self.planning_compressor = PlanningContextCompressor(guard=planning_guard, llm=compression_llm)
+        self.evidence_compressor = EvidenceContextCompressor(
+            guard=planning_guard, llm=compression_llm,
+            enabled=settings.REFLECTION_CONTEXT_COMPRESSION_ENABLED,
+        )
         artifact_repository = ArtifactRepository(database)
         skill_repository = SkillRepository(database)
         self.skill_registry = SkillRegistry(skills_root, skill_repository)
@@ -88,6 +126,9 @@ class RunService:
             recent_turns=settings.CONTEXT_RECENT_TURNS,
             session_search_top_k=settings.SESSION_SEARCH_TOP_K,
             session_search_window=settings.SESSION_SEARCH_WINDOW,
+            planning_compressor=self.planning_compressor,
+            topic_summary_repository=self.topic_summaries,
+            planning_compression_enabled=settings.PLANNER_CONTEXT_COMPRESSION_ENABLED,
         )
         memory_llm = None
         if (
@@ -149,13 +190,23 @@ class RunService:
             if context.workflow_mode is WorkflowMode.DEEP_RESEARCH:
                 agent = DeepResearchAgent(retrieval_provider=provider, run_id=context.run_id)
                 agents.append(agent)
-                return DeepResearchDriver(context, agent, events=events)
+                return DeepResearchDriver(
+                    context, agent, events=events,
+                    evidence_context_compressor=self.evidence_compressor,
+                )
             worker = WorkerCoordinator(
                 retrieval_provider=provider,
                 max_parallel_workers=context.budget_limits.max_concurrency,
+                evidence_context_compressor=self.evidence_compressor,
             )
-            bundle = MultiAgentFactory.create_default_bundle(retrieval_provider=provider, worker=worker)
-            return PlanExecuteReportDriver(context, bundle.orchestrator, events=events)
+            bundle = MultiAgentFactory.create_default_bundle(
+                retrieval_provider=provider, worker=worker,
+                evidence_context_compressor=self.evidence_compressor,
+            )
+            return PlanExecuteReportDriver(
+                context, bundle.orchestrator, events=events,
+                evidence_context_compressor=self.evidence_compressor,
+            )
 
         runtime = HarnessRuntime(
             run_repository=self.runs, message_repository=self.messages,
@@ -165,6 +216,8 @@ class RunService:
             artifact_store=self.artifact_store, artifact_repository=ArtifactRepository(self.database),
             event_bus=self.event_bus,
             context_builder=self.context_builder, memory_extractor=self.memory_extractor, skill_distiller=None,
+            topic_summary_service=self.topic_summary_service,
+            overall_reflection_hook=self.overall_reflection_hook,
             prefix_tracker=prefix_tracker,
         )
         try:
@@ -271,7 +324,13 @@ class RunService:
                 )
         return True
 
-    async def resume(self, run_id: str, *, clarification: str | None = None) -> bool:
+    async def resume(
+        self,
+        run_id: str,
+        *,
+        clarification: str | None = None,
+        clarifications: list[dict[str, Any]] | None = None,
+    ) -> bool:
         before = await self.runs.get(run_id)
         pending_pause = bool(
             before and json.loads(before.config_snapshot_json or "{}").get("pause_requested")
@@ -279,14 +338,24 @@ class RunService:
         cancelling_pending_pause = bool(
             pending_pause and before and before.status != "paused"
         )
-        resumed = await self.runs.resume(run_id, clarification=clarification)
+        resumed = await self.runs.resume(
+            run_id,
+            clarification=clarification,
+            clarifications=clarifications,
+        )
         if resumed:
             current = await self.runs.get(run_id)
+            has_clarification = bool(clarification or clarifications)
             await self.event_bus.publish(
-                run_id, "run.clarification_received" if clarification else "run.resume_requested",
+                run_id, "run.clarification_received" if has_clarification else "run.resume_requested",
                 stage=current.current_stage if current else "queued",
                 payload={
-                    "has_clarification": bool(clarification),
+                    "has_clarification": has_clarification,
+                    "clarification_ids": [
+                        str(item.get("clarification_id"))
+                        for item in (clarifications or [])
+                        if item.get("clarification_id")
+                    ],
                     "status": current.status if current else "queued",
                     "cancelled_pending_pause": cancelling_pending_pause,
                 },

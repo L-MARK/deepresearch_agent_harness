@@ -1,4 +1,4 @@
-"""SQLAlchemy models for the local MVP's durable fact store."""
+"""本地 MVP 持久化事实存储使用的 SQLAlchemy 模型。"""
 
 from sqlalchemy import CheckConstraint, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -38,7 +38,10 @@ class MessageModel(Base):
         CheckConstraint("role IN ('user','assistant','system')", name="ck_messages_role"),
         UniqueConstraint("session_id", "client_message_id", name="uq_messages_client_id"),
         Index("ix_messages_session_created", "session_id", "created_at"),
-        Index("uq_messages_assistant_run", "run_id", unique=True, sqlite_where=text("role = 'assistant' AND run_id IS NOT NULL")),
+        # 一个 Run 允许有多条 assistant 控制消息（例如澄清问题）和一条最终报告。
+        # 最终报告由 complete_verified() 通过 metadata.verified 保证幂等，
+        # 不能再用“每个 Run 只能有一条 assistant 消息”的数据库约束阻断 HITL。
+        Index("ix_messages_run_role", "run_id", "role", sqlite_where=text("run_id IS NOT NULL")),
     )
 
 
@@ -69,6 +72,27 @@ class RunModel(Base):
         CheckConstraint("workflow_mode IN ('deep_research','plan_execute_report')", name="ck_runs_workflow_mode"),
         Index("ix_runs_session_created", "session_id", "created_at"),
         Index("ix_runs_status_lease", "status", "lease_expires_at"),
+    )
+
+
+class SessionTopicSummaryModel(Base):
+    """One idempotent, structured topic summary for each Run in a Session."""
+
+    __tablename__ = "session_topic_summaries"
+    summary_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    session_id: Mapped[str] = mapped_column(ForeignKey("sessions.session_id"), nullable=False)
+    run_id: Mapped[str] = mapped_column(ForeignKey("runs.run_id"), nullable=False)
+    user_query: Mapped[str] = mapped_column(Text, nullable=False)
+    summary_json: Mapped[str] = mapped_column(Text, nullable=False)
+    summary_text: Mapped[str] = mapped_column(Text, nullable=False)
+    source_refs_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    summary_char_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[str] = mapped_column(String(40), nullable=False)
+    updated_at: Mapped[str] = mapped_column(String(40), nullable=False)
+    __table_args__ = (
+        UniqueConstraint("session_id", "run_id", name="uq_session_topic_summary_run"),
+        Index("ix_topic_summaries_session_created", "session_id", "created_at"),
+        Index("ix_topic_summaries_run", "run_id"),
     )
 
 

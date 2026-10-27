@@ -16,6 +16,7 @@ from deepresearch_agent.agents.multi_agent.reporter.base_reporter import BaseRep
 from deepresearch_agent.agents.multi_agent.reporter.base_reporter import ReporterConfig
 from deepresearch_agent.retrieval.base import RetrievalProvider
 from deepresearch_agent.retrieval.router import RetrievalRouter
+from deepresearch_agent.context.compression import EvidenceContextCompressor
 
 
 @dataclass
@@ -41,13 +42,15 @@ class MultiAgentFactory:
         cache_manager: Optional[CacheManager] = None,
         retrieval_provider: Optional[RetrievalProvider] = None,
         retrieval_router: Optional[RetrievalRouter] = None,
+        evidence_context_compressor: Optional[EvidenceContextCompressor] = None,
     ) -> OrchestratorBundle:
         planner = planner or BasePlanner()
-        # Evidence Card and section checkpoints use exact content/report hashes.
+        # Evidence Card 和章节检查点使用精确的内容/报告哈希。
         cache_manager = cache_manager or CacheManager(enable_vector_similarity=False)
         worker = worker or WorkerCoordinator(
             retrieval_provider=retrieval_provider,
             retrieval_router=retrieval_router,
+            evidence_context_compressor=evidence_context_compressor,
         )
         reporter = reporter or BaseReporter(
             config=reporter_config,

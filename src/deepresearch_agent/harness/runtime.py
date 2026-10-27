@@ -1,4 +1,4 @@
-"""Persistent Harness Runtime driving Context -> Plan -> Execute -> Report -> Verify."""
+"""驱动 Context → Plan → Execute → Report → Verify 的持久化 Harness Runtime。"""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ import json
 import uuid
 from typing import Any, Callable
 
+from backend.app.schemas import MessageCreate
 from deepresearch_agent.harness.budgets import BudgetExceeded, BudgetLimits, BudgetManager
 from deepresearch_agent.harness.checkpoints import CheckpointManager
 from deepresearch_agent.harness.contracts import ContractEvaluator, RunStatus, SourceMode, WorkflowMode
@@ -46,6 +47,8 @@ class HarnessRuntime:
         artifact_repository: ArtifactRepository | None = None,
         event_bus: EventBus | None = None,
         context_builder: Any | None = None,
+        topic_summary_service: Any | None = None,
+        overall_reflection_hook: Any | None = None,
         memory_extractor: Any | None = None,
         skill_distiller: Any | None = None,
         prefix_tracker: Any | None = None,
@@ -63,6 +66,8 @@ class HarnessRuntime:
         self.artifact_repository = artifact_repository
         self.workflow_factory = workflow_factory
         self.context_builder = context_builder
+        self.topic_summary_service = topic_summary_service
+        self.overall_reflection_hook = overall_reflection_hook
         self.memory_extractor = memory_extractor
         self.skill_distiller = skill_distiller
         self.prefix_tracker = prefix_tracker
@@ -88,6 +93,7 @@ class HarnessRuntime:
         if not await self.runs.acquire_lease(run_id, owner, ttl_seconds=self.lease_seconds):
             raise RuntimeError(f"Run {run_id} 已由其他 Runtime 执行")
         context: RunContext | None = None
+        driver: Any | None = None
         recovery_target: RunStatus | None = None
         set_current_run(run_id)
         try:
@@ -102,6 +108,22 @@ class HarnessRuntime:
                     await self._transition(context, RunStatus.CONTEXT_BUILDING, event_type="run.started")
                 if self.context_builder is not None:
                     context = await self.context_builder.build(context)
+                    if self.topic_summary_service is not None:
+                        planning_pack = context.context_snapshot.get("planning_context_pack")
+                        if isinstance(planning_pack, dict):
+                            try:
+                                await self.topic_summary_service.update_pre_plan(
+                                    session_id=context.session_id, run_id=context.run_id,
+                                    user_query=context.original_query,
+                                    pack=planning_pack,
+                                )
+                            except Exception as exc:
+                                await self.events.publish(
+                                    run_id,
+                                    "topic_summary.update_failed",
+                                    stage="context_building",
+                                    payload={"phase": "pre_plan", "error": type(exc).__name__},
+                                )
                     selected_skill = context.context_snapshot.get("selected_skill") or {}
                     await self.runs.update_model_snapshot(run_id, {
                         **context.model_snapshot,
@@ -138,10 +160,9 @@ class HarnessRuntime:
                 })
                 await self._transition(context, RunStatus.PLANNING)
             budget = BudgetManager(context.budget_limits, context.budget_usage)
-            # A checkpoint and its relational side effects are normally written
-            # in order, but a process can stop between those commits. Replaying
-            # these idempotent persistence steps reconstructs missing rows from
-            # the driver snapshot without repeating an external tool/LLM call.
+            # 检查点及其关联的持久化副作用通常按顺序写入，但进程可能在两次提交之间停止。
+            # 重放这些幂等的持久化步骤，可以根据 Driver 快照补齐缺失记录，
+            # 而无需再次调用外部工具或 LLM。
             if recovery_target in {RunStatus.EXECUTING, RunStatus.REPORTING, RunStatus.VERIFYING}:
                 await self._persist_plan(context, driver)
             if recovery_target in {RunStatus.REPORTING, RunStatus.VERIFYING}:
@@ -196,6 +217,37 @@ class HarnessRuntime:
                     await self._assert_not_cancelled(context)
                     await self._persist_execution(context, driver, budget)
                     context.workflow_state = driver.snapshot()
+                    prepare_reflection = getattr(driver, "prepare_overall_reflection", None)
+                    if callable(prepare_reflection):
+                        evidence_context_pack = await prepare_reflection()
+                        reflection_result = None
+                        if self.overall_reflection_hook is not None and isinstance(evidence_context_pack, dict):
+                            reflection_result = await self.overall_reflection_hook.reflect(
+                                context=context, evidence_context_pack=evidence_context_pack,
+                            )
+                        context.workflow_state = driver.snapshot()
+                        if reflection_result is not None:
+                            context.workflow_state["overall_reflection"] = reflection_result
+                    if self.topic_summary_service is not None:
+                        state_snapshot = context.workflow_state.get("state", context.workflow_state)
+                        snapshot_context = state_snapshot.get("context_snapshot", {}) if isinstance(state_snapshot, dict) else {}
+                        if isinstance(state_snapshot, dict) and not snapshot_context and isinstance(state_snapshot.get("evidence_context_pack"), dict):
+                            snapshot_context = {"evidence_context_pack": state_snapshot.get("evidence_context_pack")}
+                        evidence_pack = snapshot_context.get("evidence_context_pack") if isinstance(snapshot_context, dict) else None
+                        if isinstance(evidence_pack, dict):
+                            try:
+                                await self.topic_summary_service.update_post_execute(
+                                    session_id=context.session_id, run_id=context.run_id,
+                                    user_query=context.original_query, pack=evidence_pack,
+                                    execution_records=driver.execution_records(),
+                                )
+                            except Exception as exc:
+                                await self.events.publish(
+                                    run_id,
+                                    "topic_summary.update_failed",
+                                    stage="executing",
+                                    payload={"phase": "post_execute_pre_reflection", "error": type(exc).__name__},
+                                )
                     context.budget_usage = budget.usage
                     persisted_evidence = await self.evidence_repository.list_for_run(run_id)
                     minimum_evidence = int(context.config_snapshot.get("min_evidence", 1))
@@ -215,10 +267,9 @@ class HarnessRuntime:
                                 "passed": False,
                             },
                         )
-                        # One focused replan is useful for a poorly phrased first
-                        # retrieval (and recovers known short-query cases). Repeating
-                        # another full plan after two zero-evidence executions only
-                        # burns time/tokens and cannot produce a supported report.
+                        # 对表达不清导致的首次检索失败，进行一次有针对性的重新规划很有用，
+                        # 也可以恢复已知的短查询场景。两次零证据执行后再完整重规划，
+                        # 只会消耗时间和 Token，仍然无法生成有依据的报告。
                         if budget.usage.replans == 0 and budget.limits.max_replans > 0:
                             budget.consume_replan()
                             context.budget_usage = budget.usage
@@ -343,6 +394,42 @@ class HarnessRuntime:
                         context.status = RunStatus.COMPLETED
                         context.budget_usage = budget.usage
                         self._attach_prefix_usage(context)
+                        # The final topic summary is best-effort bookkeeping.  It
+                        # must not prevent a verified run from completing, but it
+                        # is written before the completion checkpoint so a retry
+                        # can safely reuse the same idempotent summary row.
+                        if self.topic_summary_service is not None:
+                            try:
+                                await self.topic_summary_service.update_final(
+                                    session_id=context.session_id,
+                                    run_id=context.run_id,
+                                    user_query=context.original_query,
+                                    extra={
+                                        "completed_work": [{
+                                            "phase": "report",
+                                            "status": "verified",
+                                            "report_char_count": len(context.report or ""),
+                                        }],
+                                        "generated_artifacts": [{
+                                            "artifact_type": "final_report",
+                                            "run_id": context.run_id,
+                                            "version": "final",
+                                        }],
+                                    },
+                                )
+                                await self.events.publish(
+                                    run_id,
+                                    "topic_summary.updated",
+                                    stage="completed",
+                                    payload={"phase": "final"},
+                                )
+                            except Exception as exc:
+                                await self.events.publish(
+                                    run_id,
+                                    "topic_summary.update_failed",
+                                    stage="completed",
+                                    payload={"phase": "final", "error": type(exc).__name__},
+                                )
                         await self.runs.complete_verified(run_id, assistant_content=context.report or "", usage=budget.snapshot())
                         await self.checkpoints.save(context, "completed")
                         await self.events.publish(run_id, "run.completed", stage="completed", payload={"verified": True})
@@ -430,7 +517,26 @@ class HarnessRuntime:
         except Exception as exc:
             if context is not None and not self.state_machine.is_terminal(context.status):
                 if str(exc) == "needs_user_input":
-                    await self._transition(context, RunStatus.NEEDS_USER_INPUT, event_type="run.needs_user_input", error_message=str(exc))
+                    questions = self._clarification_questions(context, driver)
+                    history = self._clarification_history(context, driver, questions)
+                    context.config_snapshot["clarifications"] = history
+                    context.config_snapshot["pending_clarifications"] = questions
+                    if driver is not None:
+                        # 规划器刚刚把 PlannerResult 和 PlanContext 写入内存，
+                        # 必须先保存快照，再让 Run 进入等待状态。
+                        context.workflow_state = driver.snapshot()
+                    await self.runs.update_config_snapshot(run_id, {
+                        "clarifications": history,
+                        "pending_clarifications": questions,
+                    })
+                    await self._transition(
+                        context,
+                        RunStatus.NEEDS_USER_INPUT,
+                        event_type="run.needs_user_input",
+                        error_message=str(exc),
+                        payload={"questions": questions, "clarification_history": history},
+                    )
+                    await self._persist_clarification_request(context, questions)
                 else:
                     await self._transition(context, RunStatus.FAILED, event_type="run.failed", error_code=type(exc).__name__, error_message=str(exc))
                 await self.checkpoints.save(context, context.status.value)
@@ -438,6 +544,73 @@ class HarnessRuntime:
         finally:
             set_current_run(None)
             await self.runs.release_lease(run_id, owner)
+
+    @staticmethod
+    def _clarification_questions(context: RunContext, driver: Any | None) -> list[dict[str, Any]]:
+        """统一 Planner 澄清和 Context 指代消解的前端问题结构。"""
+        if driver is not None and hasattr(driver, "clarification_questions"):
+            questions = driver.clarification_questions()
+            if questions:
+                return questions[:2]
+        question = str(context.config_snapshot.get("clarification_question") or "").strip()
+        if not question:
+            question = "请补充研究对象、范围或时间条件，以便继续当前研究。"
+        return [{
+            "clarification_id": f"clarification_context_{context.run_id}",
+            "question": question,
+            "ambiguity_type": "research_scope",
+            "blocking": True,
+        }]
+
+    @staticmethod
+    def _clarification_history(
+        context: RunContext,
+        driver: Any | None,
+        questions: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        history = (
+            driver.clarification_history()
+            if driver is not None and hasattr(driver, "clarification_history")
+            else context.config_snapshot.get("clarifications", [])
+        )
+        output = [dict(item) for item in history if isinstance(item, dict)]
+        known = {str(item.get("clarification_id")) for item in output}
+        for question in questions:
+            if str(question.get("clarification_id")) in known:
+                continue
+            output.append({
+                **question,
+                "answer": None,
+                "asked_at": None,
+                "answered_at": None,
+            })
+        return output
+
+    async def _persist_clarification_request(
+        self,
+        context: RunContext,
+        questions: list[dict[str, Any]],
+    ) -> None:
+        """将本轮问题作为同一 Run 的 assistant 控制消息持久化。"""
+        if not questions:
+            return
+        content = "需要补充以下信息：\n" + "\n".join(
+            f"{index}. {item.get('question', '')}" for index, item in enumerate(questions, 1)
+        )
+        question_key = json.dumps(questions, ensure_ascii=False, sort_keys=True)
+        client_message_id = f"clarification-request:{uuid.uuid5(uuid.NAMESPACE_URL, context.run_id + question_key).hex}"[:128]
+        await self.messages.append(MessageCreate(
+            session_id=context.session_id,
+            run_id=context.run_id,
+            role="assistant",
+            content=content,
+            client_message_id=client_message_id,
+            metadata={
+                "type": "clarification_request",
+                "run_id": context.run_id,
+                "questions": questions,
+            },
+        ))
 
     async def _load_context(self, run_id: str) -> RunContext:
         run = await self.runs.get(run_id)
@@ -479,7 +652,7 @@ class HarnessRuntime:
 
     @staticmethod
     def _safe_stage_after(checkpoint_status: RunStatus) -> RunStatus:
-        """Return the first operation not committed by a stage-end checkpoint."""
+        """返回阶段结束检查点尚未提交的第一个操作。"""
         return {
             RunStatus.CONTEXT_BUILDING: RunStatus.PLANNING,
             RunStatus.PLANNING: RunStatus.EXECUTING,
@@ -534,7 +707,7 @@ class HarnessRuntime:
             raise RunCancelled("Run 已请求取消")
 
     async def _run_with_heartbeat(self, context: RunContext, budget: BudgetManager, operation):
-        """Run one long stage while persisting usage and enforcing cancel/budget limits."""
+        """执行一个较长阶段，同时持久化用量并执行取消/预算限制。"""
         task = asyncio.create_task(operation)
         try:
             while not task.done():
@@ -614,7 +787,7 @@ class HarnessRuntime:
 
     @staticmethod
     def _token_usage_total(usage: dict[str, Any] | None) -> int:
-        """Normalize provider usage without double-counting a reported total."""
+        """规范化 Provider 用量，避免重复计算已报告的总数。"""
         values = usage or {}
         for key in ("total_tokens", "total", "tokens"):
             if values.get(key) is not None:
